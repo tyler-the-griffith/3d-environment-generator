@@ -47,6 +47,14 @@ INPUT_TYPES = {
                   "explain": "Pictures of looks you like. Used as guidance for materials, plant character and mood."},
     "model":     {"label": "3D model / scan", "accepts": ".obj,.glb,.gltf,.ply,.fbx,.stl,.blend", "folder": True,
                   "explain": "An existing 3D model or photogrammetry scan to place in the scene (e.g. the house)."},
+    "lidar":     {"label": "Public LiDAR data", "text": True, "placeholder":
+                  "Address or coordinates (e.g. 40.5729, -105.1438) — or leave blank to use the location from your "
+                  "other inputs (photo GPS, site location)",
+                  "explain": "Allow the use of free public elevation data from the US Geological Survey: measured "
+                             "ground slopes everywhere in the US, and — where a laser survey exists — measured roof and "
+                             "tree heights and true-scale building outlines. The location (and an address, if you give "
+                             "one, via the US Census geocoder) is sent to those public services. Surveys can be years "
+                             "old, so trees may have grown since."},
     "location":  {"label": "Site location", "text": True,
                   "explain": "Address or coordinates, and which way is north on the plan. Sets real sun angles "
                              "and shadows."},

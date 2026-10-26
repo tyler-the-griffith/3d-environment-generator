@@ -14,9 +14,9 @@ transcribe a landscaper's drawing: read pixel positions off the plan image.
 | key | meaning |
 |---|---|
 | `project` | `name`, `units` (`ft` \| `m` \| `in` \| `cm` \| `mm` \| `yd`) |
-| `site.location` | `lat`, `lon`, `utc_offset` (hours), `north_offset_deg` (how far site +Y is rotated clockwise from true north). Drives the sun. |
+| `site.location` | `lat`, `lon`, `utc_offset` (hours), `north_offset_deg` (how far site +Y is rotated clockwise from true north). Drives the sun. `origin: [lat, lon]` geo-references the site: the lat/lon of site (0, 0). Needed for photo matches and LiDAR terrain (`lv photos --anchor` computes it from a straight-down plan photo). |
 | `site.boundary` | property line polygon |
-| `site.terrain` | `type: flat` · `type: graded` + `points: [[x, y, elevation], ...]` (smooth thin-plate surface through them) · `type: scan` (ground filtered from a `mesh` element with `role: terrain`; `filter_window` m, default 14). `margin` (default 25 m) and `resolution` (default 0.5 m) for the modeled ground. |
+| `site.terrain` | `type: flat` · `type: graded` + `points: [[x, y, elevation], ...]` (smooth thin-plate surface through them) · `type: lidar` (measured bare earth from `lv lidar fetch`, placed via `site.location.origin`; optional `offset`) · `type: scan` (ground filtered from a `mesh` element with `role: terrain`; `filter_window` m, default 14). `margin` (default 25 m) and `resolution` (default 0.5 m) for the modeled ground. |
 | `plan` | `image` (from `lv plan import`), `calibration` (below) |
 | `defaults.frame` | `site` (default) or `plan` |
 | `catalogs` | extra species YAML files (a `species.yaml` beside project.yaml is loaded automatically) |
@@ -52,7 +52,8 @@ Every element has `kind`, and optionally `id` (recommended: shows in previews an
 | `path` | `line`, `width` | everything `paving` takes; `smooth`; `style: stepping_stones` + `stone_size`, `gap` |
 | `wall` | `line`, `height` | `thickness`, `material` (`block` `stone` `fieldstone` `brick` `concrete` `timber` `gabion`), `top: level \| follow`, `cap`, `closed` |
 | `fence` | `line`, `height` | `style` (`privacy` `picket` `rail` `split_rail` `horizontal` `metal`), `color`, `post_spacing`, `closed` |
-| `structure` | `footprint`, `wall_height` | `roof: {type: hip \| gable \| shed \| flat, pitch: "6/12", overhang, ridge: auto \| x \| y}`, `floor_raise`, `colors: {walls, roof, trim, door, foundation}`, `windows` / `doors` / `garage_doors`: `[{edge, at 0-1, width, height, sill, count, spacing}]` (edge *i* runs from footprint point *i* to *i+1*; the preview labels them e0, e1…). Roofs fit the footprint's bounding rectangle, so model an L-shaped house as two rectangular wings. |
+| `structure` | `footprint` + `wall_height`, **or** `wings` | `wings: [{footprint, wall_height, roof, base, walls, colors}]`: convex footprints (usually rectangles) that overlap to make L/T plans and cross-gables. `roof: {type, pitch: "8/12", ridge: auto \| x \| y \| <edge index>, overhang}`, types `gable`, `hip`, `half_hip` (+ `half_hip: 0.6`), `gambrel` / `mansard` (+ `lower_pitch`, `break`), `shed` (+ `low_edge`), `flat` (+ `parapet`), `custom` (+ `edges: {i: [[pitch°, offset_m, start_m], …] \| wall}`). `base` raises a wing's floor (split levels); `walls: false` gives an open porch/carport on corner posts. `floor_raise`, `colors: {walls, roof, trim, door, foundation}`, `windows` / `doors` / `garage_doors`: `[{wing, edge, at 0-1, width, height, sill, count, spacing}]` (edge *i* runs from footprint point *i* to *i+1*). |
+| `deck` | `polygon`, `height` (above grade) | `railing: {style: balusters \| horizontal \| glass \| none, height, color, open_edges}`, `stairs: [{edge, at, width, rise, run}]`, `material`, `color`, `posts` |
 | `mesh` | `file` (.obj .ply .glb .gltf .fbx .stl .blend) | `role: terrain` (a drone scan), `alignment: {points: [{model: [x,y,z], site: [x,y,z]}, ...]}` (3+ pairs) or `matrix` or `at` + `rotation` + `scale`, `drop_to_ground`, `keep` (polygons to keep from a scan, e.g. the house), `clip_out` (polygons to cut; defaults to the boundary for terrain scans) |
 | `plant` | `species`, `at` | `height`/`spread` (override growth), `planted_height`/`planted_spread`, `rotation`, `variation` (±fraction, default 0.12), `sheared`, `existing` |
 | `plant_group` | `species`, `polygon` | `spacing` (on-center, triangular grid) **or** `count` (scattered), `jitter` |
@@ -87,6 +88,24 @@ variants:
 members of a generated layout by index: `at`, `height`, `spread` (`height` sets size for
 boulders), or `remove: true`. Indices stay stable when members are removed. Explicit
 `height`/`spread` are exact (no random variation).
+
+## Photo matches
+
+Re-create real photos as cameras so the model can be compared with them (`lv photomatch`).
+
+```yaml
+photo_matches:
+  altitude_ref: {photo: app/files/<id>/ground.jpg, z: 4}   # a photo taken at site height z → GPS altitude calibration
+  photos:
+    - {name: overhead, file: app/files/<id>/DJI_0054.jpg, yaw: 0, pitch: -90, fov: 35.5}
+    - {name: street, file: app/files/<id>/DJI_0057.jpg, yaw: 40, pitch: -25}
+```
+
+Position comes from GPS via `site.location.origin` (or give `position: [x, y, z]`). Heading `yaw`
+(compass degrees), tilt `pitch` (−90 = straight down) and `roll` come from DJI gimbal metadata
+when the file has it, otherwise from here. `fov` (horizontal degrees) overrides the lens data,
+which is wrong on digitally zoomed or cropped exports. `lv photos <files> --project P` prints
+each photo's metadata and site position.
 
 ## Views
 

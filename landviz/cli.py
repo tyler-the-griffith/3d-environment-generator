@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import math
 import json
 import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
+
+import numpy as np
 from pathlib import Path
 
 from . import blender_bridge, edits, ingest, outputs, reconstruct, solar
@@ -297,6 +300,288 @@ def cmd_report(args):
     _finish(prep, produced, fp, args)
 
 
+def cmd_photos(args):
+    """Photo metadata table; with --project, site positions and (with --anchor) geo-anchoring + scale check."""
+    from . import photos
+    files = []
+    for f in args.files:
+        p = Path(f)
+        files += sorted(x for x in p.iterdir() if x.suffix.lower() in (".jpg", ".jpeg")) if p.is_dir() else [p]
+    proj = project_mod.load(args.project) if args.project else None
+    origin, north = (None, 0.0)
+    if proj:
+        from .resolve import site_origin
+        origin, north = site_origin(proj)
+    rows = [photos.read(f) for f in files]
+    lon_sign = -1 if (origin and origin[1] < 0) or args.west else 1
+    for r in rows:
+        if r.get("lon_ref_missing") and "lon" in r:
+            r["lon"] = abs(r["lon"]) * lon_sign
+    ref_alt = None
+    if args.ground:
+        ref_alt = photos.read(args.ground).get("alt")
+    print(f"{'photo':42} {'time':8} {'lat':>10} {'lon':>11} {'alt m':>8} {'H m':>6} {'f35':>4} {'hFOV':>5} "
+          f"{'yaw':>6} {'pitch':>6}" + ("   site x,y (m)" if origin else ""))
+    for r in rows:
+        H = (r["alt"] - ref_alt) if ref_alt is not None and r.get("alt") is not None else r.get("rel_alt")
+        hf, _ = photos.fov_deg(r)
+        line = (f"{Path(r['file']).name[:42]:42} {str(r.get('datetime', ''))[11:19]:8} {r.get('lat', 0):10.6f} "
+                f"{r.get('lon', 0):11.6f} {r.get('alt', 0):8.1f} {H if H is not None else float('nan'):6.1f} "
+                f"{r.get('f35') or 0:4} {hf:5.1f} {r.get('gimbal_yaw', float('nan')):6.1f} "
+                f"{r.get('gimbal_pitch', float('nan')):6.1f}")
+        if origin and "lat" in r:
+            x, y = photos.latlon_to_site(r["lat"], r["lon"], origin, north)
+            line += f"   {x:7.1f},{y:7.1f}"
+        print(line)
+    if any(r.get("lon_ref_missing") for r in rows):
+        print("note: these files have no E/W, N/S markers; longitude sign taken from the site origin"
+              + (" (or --west)" if not origin else ""))
+    if not any("gimbal_yaw" in r for r in rows):
+        print("note: no DJI gimbal angles (edited/exported files drop them) — photo matches need yaw/pitch in the design")
+    if args.anchor:
+        if not proj or not proj.plan_frame:
+            sys.exit("--anchor needs --project with a calibrated plan image (the straight-down photo)")
+        a = photos.read(args.anchor)
+        if a.get("lon_ref_missing"):
+            a["lon"] = abs(a["lon"]) * lon_sign
+        w, h = a["width"], a["height"]
+        sx, sy = proj.plan_frame.to_site([(w / 2, h / 2)])[0]
+        o = photos.site_to_latlon(-sx, -sy, (a["lat"], a["lon"]), north)
+        print(f"\nanchor: the camera of {Path(args.anchor).name} is above plan pixel ({w / 2:.0f}, {h / 2:.0f}) = site "
+              f"({sx:.2f}, {sy:.2f}) m\n  → site.location.origin: [{o[0]:.7f}, {o[1]:.7f}]   (lat/lon of site 0,0)")
+        Hn = (a["alt"] - ref_alt) if ref_alt is not None else a.get("rel_alt")
+        if Hn:
+            hf, _ = photos.fov_deg(a)
+            gsd = 2 * Hn * math.tan(math.radians(hf) / 2) / w
+            plan = proj.plan_frame.meters_per_pixel
+            print(f"  scale check: plan calibration {plan * 100:.2f} cm/px vs camera geometry {gsd * 100:.2f} cm/px "
+                  f"(height {Hn:.1f} m, hFOV {hf:.1f}°) → ratio {plan / gsd:.2f}")
+            if abs(plan / gsd - 1) > 0.15:
+                print("  ⚠ these disagree by more than 15%: either the plan calibration or the photo's lens/height "
+                      "data is off (edited exports may be cropped). Check against a measured distance or LiDAR.")
+
+
+def cmd_photomatch(args):
+    """Render the model from each photo's camera and compare (photo | model | overlay | edges)."""
+    prep = _prepare(args, detail=getattr(args, "quality", None) or "draft")
+    pv = prep.scene.get("photo_views") or []
+    for i in prep.project.issues:
+        if i.where.startswith("photo_matches"):
+            print(i)
+    if not pv:
+        sys.exit("no usable photo matches — add `photo_matches` to the design (see docs/SPEC.md)")
+    scene = json.loads(json.dumps(prep.scene))
+    scene["views"] = pv
+    sp = prep.scene_path.with_name(prep.scene_path.stem + "__photomatch.json")
+    sp.write_text(json.dumps(scene))
+    prep.scene_path.write_text(json.dumps(prep.scene, indent=1))
+    fp, _path, _ = _model(prep)
+    out_dir = outputs.state_dir(prep.project, prep.state) / "photo-match"
+    out_dir.mkdir(exist_ok=True)
+    renders = {v["name"]: str(out_dir / f"{v['name']}.model.png") for v in pv}
+    prep.store.use(fp, sp, ["render"], blender_bridge.pick_device(getattr(args, "device", "auto")), "photomatch",
+                   views=list(renders), outputs=renders)
+    produced = []
+    for v in pv:
+        model = Path(renders[v["name"]])
+        if not model.exists():
+            continue
+        out = out_dir / f"{v['name']}.png"
+        _photo_compare(Path(v["photo"]), model, out, v["resolution"])
+        produced.append((f"match-{v['name']}", "still", out))
+        print("photo match →", out)
+    _finish(prep, produced, fp, args)
+
+
+def _photo_compare(photo: Path, model: Path, out: Path, res):
+    """2×2 sheet: photo | model / 50% overlay | model edges (red) on the photo. All at the photo's size."""
+    W, H = res
+    tmp = out.with_suffix(".tmp")
+    tmp.mkdir(exist_ok=True)
+    a, m, e, c, d = (tmp / f"{k}.png" for k in "amecd")
+    fit = ["-resize", f"{W}x{H}!"]
+    subprocess.run(["magick", str(photo), "-auto-orient", *fit, str(a)], check=True)
+    subprocess.run(["magick", str(model), *fit, str(m)], check=True)
+    subprocess.run(["magick", str(m), "-colorspace", "Gray", "-canny", "0x1+8%+25%", "-morphology", "Dilate",
+                    "Disk:1", str(e)], check=True)
+    subprocess.run(["magick", str(a), str(m), "-compose", "blend", "-define", "compose:args=50", "-composite",
+                    str(c)], check=True)
+    subprocess.run(["magick", str(a), "(", "-size", f"{W}x{H}", "xc:#ff2a2a", ")", str(e), "-composite", str(d)],
+                   check=True)
+    size = str(max(18, W // 40))
+
+    def label(path, text):
+        subprocess.run(["magick", str(path), "-gravity", "NorthWest", "-fill", "white", "-undercolor", "#000a",
+                        "-pointsize", size, "-annotate", "+10+8", f" {text} ", str(path)], check=True)
+    for path, text in ((a, "Photo"), (m, "Model"), (c, "50% overlay"), (d, "Model edges on photo")):
+        label(path, text)
+    subprocess.run(["magick", "(", str(a), str(m), "+append", ")", "(", str(c), str(d), "+append", ")",
+                    "-append", "-resize", "2400x>", "-quality", "88", str(out)], check=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _lidar_location(args, proj):
+    """Where to fetch: --latlon, --address, the design's origin/location, or the photos' GPS."""
+    from . import lidar, photos
+    from .resolve import site_origin
+    if args.latlon:
+        ll = photos.parse_latlon(args.latlon)
+        if not ll:
+            sys.exit(f"couldn't read coordinates from {args.latlon!r}")
+        return ll[0], ll[1], f"coordinates {ll[0]:.6f}, {ll[1]:.6f}"
+    if args.address:
+        lat, lon, matched = lidar.geocode(args.address)
+        return lat, lon, matched
+    origin, _ = site_origin(proj)
+    if origin:
+        return origin[0], origin[1], "site.location.origin"
+    gps = []
+    for f in list(proj.dir.rglob("*.jpg")) + list(proj.dir.rglob("*.JPG")):
+        if "renders" in f.parts or "derived" in f.parts:
+            continue
+        info = photos.read(f)
+        if "lat" in info:
+            gps.append((info["lat"], info["lon"], info.get("lon_ref_missing")))
+    loc = (proj.spec.get("site", {}) or {}).get("location", {}) or {}
+    if gps:
+        lat = sum(g[0] for g in gps) / len(gps)
+        lon = sum(g[1] for g in gps) / len(gps)
+        if any(g[2] for g in gps) and float(loc.get("lon", -1)) < 0:
+            lon = -abs(lon)
+        return lat, lon, f"GPS of {len(gps)} project photos"
+    if "lat" in loc and "lon" in loc:
+        return float(loc["lat"]), float(loc["lon"]), "site.location (may be approximate)"
+    sys.exit("no location: pass --address or --latlon, or add photos with GPS / site.location.origin")
+
+
+def cmd_lidar(args):
+    from . import lidar
+    proj = project_mod.load(args.project)
+    ldir = proj.derived / "lidar"
+    if args.lidar_cmd == "fetch":
+        lat, lon, how = _lidar_location(args, proj)
+        print(f"location: {lat:.6f}, {lon:.6f}  ({how})")
+        meta = lidar.fetch(ldir, lat, lon, args.radius, args.res, points=not args.no_points, place=how)
+        _lidar_summary(proj, ldir)
+        return
+    if not (ldir / "lidar.npz").exists():
+        sys.exit("no LiDAR data for this project yet — run `lv lidar fetch` first")
+    if args.lidar_cmd == "info":
+        _lidar_summary(proj, ldir)
+    elif args.lidar_cmd == "heights":
+        _lidar_heights(proj, ldir, args.at)
+    elif args.lidar_cmd == "image":
+        print("height map →", _lidar_image(proj, ldir, args.extent))
+
+
+def _lidar_summary(proj, ldir):
+    from . import lidar
+    grids, meta = lidar.load(ldir)
+    dem = grids["dem"]
+    span = 2 * meta["radius"]
+    print(f"LiDAR data: {span:.0f} m × {span:.0f} m around {meta['center'][0]:.6f}, {meta['center'][1]:.6f} "
+          f"at {meta['res']} m")
+    print(f"  ground: {np.nanmin(dem):.1f}–{np.nanmax(dem):.1f} m elevation (relief {np.nanmax(dem) - np.nanmin(dem):.1f} m)")
+    pc = meta.get("point_cloud")
+    if pc:
+        nd = grids["dsm"] - dem
+        print(f"  point cloud: {pc['dataset']} ({pc['returns']:,} returns) — buildings and trees measured")
+        print(f"  tallest feature {np.nanmax(nd):.1f} m above ground; building cells {int(grids['building'].sum())}, "
+              f"vegetation cells {int(grids['vegetation'].sum())}")
+    else:
+        print(f"  point cloud: none ({meta.get('point_cloud_error', 'not requested')}) — terrain only")
+
+
+def _lidar_heights(proj, ldir, points):
+    from . import lidar, units
+    from .resolve import site_origin
+    grids, meta = lidar.load(ldir)
+    origin, north = site_origin(proj)
+    if origin is None:
+        sys.exit("set site.location.origin first (lat/lon of site 0,0) — e.g. from `lv photos --anchor`")
+    k = units.TO_METERS[proj.units]
+    e0, n0 = lidar.site_to_local(0.0, 0.0, meta, origin, north)
+    z0 = float(lidar.sample(grids["dem"], meta, [e0], [n0])[0])
+    print(f"{'x':>8} {'y':>8}   ground z ({proj.units})   height above ground ({proj.units})")
+    for spec in points:
+        x, y = (float(v) for v in spec.split(","))
+        E, N = lidar.site_to_local(x * k, y * k, meta, origin, north)
+        g = float(lidar.sample(grids["dem"], meta, [E], [N])[0])
+        line = f"{x:8.1f} {y:8.1f}   {(g - z0) / k:10.2f}"
+        if "dsm" in grids:
+            # highest return within ~1 m (roof peaks and treetops are small targets)
+            r, res, n = meta["radius"], meta["res"], meta["size"]
+            i, j = int(round((float(N) + r) / res)), int(round((float(E) + r) / res))
+            win = grids["dsm"][max(0, i - 1):i + 2, max(0, j - 1):j + 2]
+            line += f"   {(np.nanmax(win) - g) / k:10.2f}"
+        print(line)
+
+
+def _lidar_image(proj, ldir, extent):
+    """Top-down height map in the site frame with a labeled grid (project units), for reading
+    building outlines, roof ridges and tree crowns at true scale — no photo lean."""
+    from . import lidar, units
+    from .resolve import site_origin
+    grids, meta = lidar.load(ldir)
+    origin, north = site_origin(proj)
+    if origin is None:
+        sys.exit("set site.location.origin first (lat/lon of site 0,0)")
+    k = units.TO_METERS[proj.units]
+    if extent:
+        x0, y0, x1, y1 = (float(v) * k for v in extent.split(","))
+    else:
+        from . import geometry
+        from .resolve import _boundary
+        bx0, by0, bx1, by1 = geometry.bbox(_boundary(proj))
+        pad = 0.25 * max(bx1 - bx0, by1 - by0)
+        x0, y0, x1, y1 = bx0 - pad, by0 - pad, bx1 + pad, by1 + pad
+    px = 0.1  # 10 cm per pixel
+    W, H = int((x1 - x0) / px), int((y1 - y0) / px)
+    xs = x0 + (np.arange(W) + 0.5) * px
+    ys = y1 - (np.arange(H) + 0.5) * px
+    X, Y = np.meshgrid(xs, ys)
+    E, N = lidar.site_to_local(X.ravel(), Y.ravel(), meta, origin, north)
+    dem = lidar.sample(grids["dem"], meta, E, N).reshape(H, W)
+    if "dsm" in grids:
+        hag = np.clip(lidar.sample(grids["dsm"], meta, E, N).reshape(H, W) - dem, 0, None)
+    else:
+        hag = dem - np.nanmin(dem)
+    # colour by height (0 → dark, 12 m+ → bright), shaded by the surface slope
+    top = max(3.0, float(np.nanpercentile(hag, 99.5)))
+    t = np.clip(hag / top, 0, 1)
+    gy, gx = np.gradient(dem + (hag if "dsm" in grids else 0), px)
+    shade = np.clip(0.65 + 0.35 * (-gx * 0.7 + gy * 0.7) / np.sqrt(1 + gx ** 2 + gy ** 2), 0.3, 1)
+    ramp = np.array([[20, 30, 45], [40, 110, 70], [190, 190, 60], [230, 120, 40], [250, 240, 230]], float)
+    pos = t * (len(ramp) - 1)
+    lo = np.floor(pos).astype(int).clip(0, len(ramp) - 2)
+    f = (pos - lo)[..., None]
+    rgb = (ramp[lo] * (1 - f) + ramp[lo + 1] * f) * shade[..., None]
+    img = rgb.clip(0, 255).astype(np.uint8)
+    out = ldir / "height-map.png"
+    raw = ldir / "height-map.rgb"
+    raw.write_bytes(img.tobytes())
+    step = 10 if proj.units == "ft" else 5  # grid every 10 ft / 5 m
+    draw = []
+    for gxv in np.arange(math.ceil(x0 / k / step) * step, x1 / k, step):
+        c = (gxv * k - x0) / px
+        draw += ["-draw", f"line {c:.0f},0 {c:.0f},{H}"]
+    for gyv in np.arange(math.ceil(y0 / k / step) * step, y1 / k, step):
+        r = (y1 - gyv * k) / px
+        draw += ["-draw", f"line 0,{r:.0f} {W},{r:.0f}"]
+    labels = []
+    for gxv in np.arange(math.ceil(x0 / k / step) * step, x1 / k, step * 2):
+        labels += ["-annotate", f"+{(gxv * k - x0) / px + 4:.0f}+{H - 8}", f"x{gxv:g}"]
+    for gyv in np.arange(math.ceil(y0 / k / step) * step, y1 / k, step * 2):
+        labels += ["-annotate", f"+4+{(y1 - gyv * k) / px - 4:.0f}", f"y{gyv:g}"]
+    subprocess.run(["magick", "-size", f"{W}x{H}", "-depth", "8", f"rgb:{raw}", "-stroke", "#ffffff55",
+                    "-strokewidth", "1", *draw, "-stroke", "none", "-fill", "white", "-pointsize", "22", *labels,
+                    "-gravity", "NorthWest", "-fill", "white", "-undercolor", "#000a", "-annotate", "+8+8",
+                    f" height above ground: dark 0 → white {top:.0f} m · grid {step} {proj.units} (site coords) ",
+                    str(out)], check=True)
+    raw.unlink()
+    return out
+
+
 def cmd_check(args):
     """Top-down render of the model with the landscaper's plan laid over it."""
     prep = _prepare(args, detail="draft")
@@ -561,6 +846,42 @@ def main(argv=None):
     p.add_argument("--what", action="append", choices=["pdf", "csv"])
     state_flags(p)
     p.set_defaults(fn=cmd_report)
+
+    p = sub.add_parser("photos", help="photo metadata (GPS, altitude, lens, gimbal) and geo-anchoring")
+    p.add_argument("files", nargs="+", help="photos or folders")
+    p.add_argument("--project", help="show site positions using the project's site.location.origin")
+    p.add_argument("--ground", help="a photo taken on the ground: heights are reported relative to it")
+    p.add_argument("--anchor", help="the straight-down photo used as the plan image: prints site.location.origin + a scale check")
+    p.add_argument("--west", action="store_true", help="treat longitudes as west when the files lack E/W markers")
+    p.set_defaults(fn=cmd_photos)
+
+    p = with_project(sub.add_parser("photomatch", help="render the model from each photo's camera and compare"))
+    p.add_argument("--quality", choices=list(QUALITY_PRESETS))
+    p.add_argument("--device", default="auto", choices=devices)
+    state_flags(p)
+    p.set_defaults(fn=cmd_photomatch)
+
+    lid = sub.add_parser("lidar", help="public USGS elevation / LiDAR data for the site").add_subparsers(
+        dest="lidar_cmd", required=True)
+    p = lid.add_parser("fetch", help="download measured terrain (+ roofs/trees if available)")
+    p.add_argument("project")
+    p.add_argument("--address", help="US street address (geocoded by the US Census)")
+    p.add_argument("--latlon", help="coordinates, e.g. '40.5729, -105.1438'")
+    p.add_argument("--radius", type=float, default=70.0, help="meters around the location (default 70)")
+    p.add_argument("--res", type=float, default=1.0, help="grid spacing in meters (default 1)")
+    p.add_argument("--no-points", action="store_true", help="terrain only (skip the point cloud)")
+    p.set_defaults(fn=cmd_lidar)
+    p = lid.add_parser("info", help="summary of the fetched data")
+    p.add_argument("project")
+    p.set_defaults(fn=cmd_lidar)
+    p = lid.add_parser("heights", help="ground elevation and height above ground at site points")
+    p.add_argument("project")
+    p.add_argument("--at", action="append", required=True, metavar="X,Y", help="site coordinates (project units)")
+    p.set_defaults(fn=cmd_lidar)
+    p = lid.add_parser("image", help="top-down height map with a site grid (true scale)")
+    p.add_argument("project")
+    p.add_argument("--extent", help="x0,y0,x1,y1 in project units (default: boundary + margin)")
+    p.set_defaults(fn=cmd_lidar)
 
     p = with_project(sub.add_parser("model", help="save the 3D model file (.blend) as an output"))
     p.add_argument("--quality", choices=list(QUALITY_PRESETS))

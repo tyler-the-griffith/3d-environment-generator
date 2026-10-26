@@ -10,6 +10,7 @@ panoramas, a walkable 3D model in the browser, a PDF presentation and a plant sc
 git clone <this repo> && cd <repo>
 ./launch              # Linux / macOS   (Windows: launch.bat)
 ./launch --install    # add it to your app menu (once)
+./launch --setup      # optional extras (LiDAR point clouds) into ./.venv (once)
 ```
 
 After `--install`, start it like any other app: Super+Space on Omarchy, the app grid on
@@ -34,6 +35,9 @@ your inputs ──(AI, once per round)──▶ design file ──(deterministic
   Claude**. The AI writes the **design file**: exact positions and sizes of every element.
   It checks its work against your plan and reports back with a summary, notes, questions,
   and a *plan check* image (the model from above with your drawing laid over it).
+  If something that would change the model is unclear (a missing dimension, whether a
+  structure stays), it **asks first**: answer each question in your own words or tick
+  *Exercise your best judgement* to accept the assumption it states, then it builds.
 - **Sent inputs are frozen** and kept as history, round by round. New inputs stack on top.
   To change or delete a sent input, start a **child variant**; its copies are editable.
 - **Outputs to make** (on both pages, never frozen): pick from still images, plan check,
@@ -44,7 +48,12 @@ your inputs ──(AI, once per round)──▶ design file ──(deterministic
 - **Output page.** Every output appears as a cover image taken from the output itself.
   Images and PDFs show inline, videos play, and the 3D walkthrough opens in place. Download
   any one, or **Download all** as folders by type. Anything made from an older version of
-  the design is marked **stale**.
+  the design is marked **stale**. The visuals come first; Generate/Download, Publish and
+  Outputs to make sit in the column on the right.
+- **Publish as a web page.** Pick which outputs to include and build one web page in the
+  app's own colors (gallery, 3D walkthrough, videos). Preview it, download it as a folder
+  for any static host, or put it online with **GitHub Pages** if the GitHub CLI (`gh`) is
+  installed and signed in. GitHub Pages sites are public; the app asks before publishing.
 - **Design file.** Viewable and editable on the input page, with every version kept.
   Changes come from the AI, from you, or from **hand edits in Blender** (Open in Blender →
   move things → save → Pull Blender edits).
@@ -52,6 +61,21 @@ your inputs ──(AI, once per round)──▶ design file ──(deterministic
   differences, so fixes to the parent flow into every variant. Variants can have variants.
 - **One model per design state.** Every output of a state comes from one saved model; a
   dusk image and a noon image of the same design come from the same file.
+
+## Accuracy tools
+
+- **Photo-match check.** Drone photos with GPS are re-created as cameras in the model and
+  rendered side by side and overlaid with each photo (red lines = the model's edges). Wrong
+  heights, roof shapes and tree positions stand out, and Claude uses it to correct itself.
+  Original DJI files (from the drone's card or the DJI Fly album, not "beautify" exports) carry
+  the camera's heading and tilt; without them Claude estimates and refines those too.
+- **Public LiDAR data.** Add a "Public LiDAR data" input (an address, coordinates, or blank to
+  use the photos' GPS). The app fetches free USGS data: measured terrain everywhere in the US,
+  and where a laser survey exists, measured roof and tree heights plus a true-scale height map.
+  The point-cloud part needs the optional extras: `./launch --setup` (one time).
+- **Roofs.** Houses are built from overlapping wings, each with its own eave height and roof
+  (gable, hip, half-hip, gambrel, mansard, shed, flat), with porches on posts and decks with
+  railings and stairs.
 
 ## AI options (Settings → AI)
 
@@ -68,7 +92,8 @@ Your inputs (plan, photos) are sent to whichever AI provider you choose.
 ## Settings
 
 Per user, shared by all projects, stored outside the repo (`~/.config/3d-environment-generator/`
-on Linux): theme mode, five palettes plus per-color overrides for light and dark,
+on Linux): theme mode, ten palettes based on Coolors' trending palettes (each checked for readable
+contrast in light and dark mode) plus a high-contrast one, per-color overrides for light and dark,
 interface and code fonts, text size, density, corner radius, navigation width, reduced
 motion, explanations on/off (also on right-click), AI provider, default units, location
 and outputs, and render device.

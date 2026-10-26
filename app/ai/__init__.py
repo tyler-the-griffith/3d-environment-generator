@@ -74,6 +74,8 @@ def start_round(node: store.Node, kind: str = "design") -> dict:
     with store.LOCK:
         d = node.inputs()
         spec = node.output_spec()
+        if any(r["status"] == "awaiting_answers" for r in d["rounds"]):
+            raise ValueError("answer the open questions first (or let the AI use its best judgement)")
         n = (d["rounds"][-1]["n"] + 1) if d["rounds"] else 1
         new_items = [it for it in d["items"] if it.get("round") is None] if kind == "design" else []
         pending = [c for c in spec["custom"] if c["status"] == "pending"]
@@ -87,7 +89,7 @@ def start_round(node: store.Node, kind: str = "design") -> dict:
             it["round"] = n
         for c in pending:
             c["status"], c["round"] = "in_progress", n
-        rnd = {"n": n, "kind": kind, "status": "queued", "provider": config.load_settings()["ai"]["provider"],
+        rnd = {"n": n, "kind": kind, "phase": "ask", "status": "queued", "provider": config.load_settings()["ai"]["provider"],
                "created": store._now(), "items": [it["id"] for it in new_items],
                "requests": [c["id"] for c in pending], "summary": "", "notes": [], "questions": []}
         d["rounds"].append(rnd)
@@ -126,7 +128,46 @@ def _describe_item(node: store.Node, it: dict) -> str:
     return "\n".join(lines)
 
 
-def build_brief(node: store.Node, rnd: dict) -> str:
+def _lidar_items(node):
+    return [it for it in node.inputs()["items"] if it["type"] == "lidar"]
+
+
+def _prefetch_lidar(job: Job, node: store.Node) -> str:
+    """If the homeowner allowed public LiDAR, fetch it before the AI starts (deterministic, cached
+    per requested location). Returns a note for the brief."""
+    items = _lidar_items(node)
+    if not items:
+        return ""
+    from landviz import photos as ph
+    text = (items[-1].get("text") or "").strip()
+    args = []
+    if text:
+        ll = ph.parse_latlon(text)
+        args = ["--latlon", f"{ll[0]}, {ll[1]}"] if ll else ["--address", text]
+    meta_file = node.project_dir / "derived" / "lidar" / "lidar.json"
+    want = json.dumps(args)
+    if meta_file.exists():
+        try:
+            if json.loads(meta_file.read_text()).get("request") == want:
+                return "LiDAR data for this site is already in the project (derived/lidar/)."
+        except json.JSONDecodeError:
+            pass
+    job.set_step("Fetching public LiDAR / elevation data (USGS)", 0.03)
+    try:
+        job.lv("lidar", "fetch", str(node.project_dir), *args)
+        meta = json.loads(meta_file.read_text())
+        meta["request"] = want
+        meta_file.write_text(json.dumps(meta, indent=1))
+        pc = meta.get("point_cloud")
+        return ("LiDAR data was fetched for this site (derived/lidar/): measured bare-earth terrain"
+                + (f" and a point cloud ({pc['dataset']}) with roof and tree heights" if pc else
+                   f"; no point cloud ({meta.get('point_cloud_error', 'unavailable')})") + ".")
+    except Exception as e:  # noqa: BLE001 — the round still runs without it
+        return (f"Fetching LiDAR data failed ({e}). If you can determine the location from the inputs, run "
+                f"`./lv lidar fetch {shlex.quote(str(node.project_dir))} --latlon \"LAT, LON\"` yourself.")
+
+
+def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
     d = node.inputs()
     spec = node.output_spec()
     meta = node.meta()
@@ -183,16 +224,42 @@ def build_brief(node: store.Node, rnd: dict) -> str:
                      "you added and which output type will produce it. If it can't be done with these "
                      "capabilities, or isn't sensible, mark it `declined` with a short, friendly reason.\n"
                      + "\n".join(f"- `{c['id']}`: {c['text']}" for c in pending))
+    if lidar_note or _lidar_items(node):
+        pq = shlex.quote(str(node.project_dir))
+        parts.append("\n\n## Public LiDAR data (the homeowner allowed it)\n" + (lidar_note or "") +
+                     "\nUse it, it's measured rather than estimated:\n"
+                     "- Geo-reference the site first: `site.location.origin` = lat/lon of site (0, 0). With a "
+                     f"straight-down plan photo, `./lv photos <photo> --project {pq} --anchor <photo> --ground <ground photo>` "
+                     "prints it, plus a scale check of your plan calibration.\n"
+                     f"- `./lv lidar info {pq}`; `./lv lidar image {pq}` writes derived/lidar/height-map.png: a true-scale "
+                     "top-down height map in site coordinates (no photo lean). Read building outlines, ridge lines and "
+                     "tree crowns from it.\n"
+                     f"- `./lv lidar heights {pq} --at X,Y --at X,Y …` gives ground elevation and height above ground "
+                     "(eaves, ridges, treetops) at site points.\n"
+                     "- Use `site.terrain: {type: lidar}` for the ground shape.\n")
     parts.append(f"\n\n## Files you may write\n- `{node.design_path}`\n- `{node.project_dir / 'species.yaml'}`"
                  f" (only to add missing plants)\n- `{result_file}`\n")
+    has_photos = any(it["type"] in ("drone", "photos") for it in d["items"])
+    if has_photos:
+        parts.append("\n## Photo-match check\nThere are photos with GPS among the inputs. Set up `photo_matches` in "
+                     "the design (see docs/SPEC.md): the model is then rendered from each photo's exact camera and "
+                     "compared with it. Use the straight-down photo and two or three angled ones. If the files have "
+                     "no gimbal data, estimate each photo's heading (yaw, compass degrees) and tilt (pitch) and refine "
+                     "them until the street and property lines line up, then fix the *model* until the rest does. "
+                     f"Run `./lv photomatch {lv_args}` and look at each sheet in renders/<state>/photo-match/.\n")
     parts.append(f"\n## Commands\nRun these **exactly as written**, from the repository root (the working directory). "
                  "Don't prefix them with `cd` or chain them with `;`/`&&`: other command shapes are blocked.\n"
                  f"- `./lv validate {lv_args}`\n- `./lv check {lv_args}`  (then open the image it prints with your Read tool)\n"
-                 f"- `./lv species <text>`\n- `./lv plan import {shlex.quote(str(node.project_dir))} <pdf>`  "
+                 f"- `./lv species <text>`\n- `./lv photos <files or folder> --project {shlex.quote(str(node.project_dir))}`"
+                 f"\n- `./lv photomatch {lv_args}`\n- `./lv plan import {shlex.quote(str(node.project_dir))} <pdf>`  "
                  "(rasterizes a PDF plan into the project's plan/ folder)\n"
                  "\nView images and PDFs with your Read tool, not with scripts. Input files live under the project's "
                  "`app/files/` folder; in the design file, reference them by path relative to the project folder "
                  "(e.g. `plan: {image: app/files/<id>/plan.png}`).\n")
+    answered = any(it.get("answers_to") == rnd["n"] for it in node.inputs()["items"])
+    if rnd.get("phase", "ask") == "ask" and not answered:
+        parts.append(f"\nIf you need answers before building, write `{rdir / 'questions.json'}` and stop "
+                     "(see \"Ask before you build\").")
     parts.append(f"\nWhen done, write `{result_file}` as described above.\n")
     return "".join(parts)
 
@@ -205,9 +272,14 @@ def run_round(job: Job, node: store.Node, rnd: dict):
     prompt_file.write_text(brief)
     result_file = rdir / "result.json"
     result_file.unlink(missing_ok=True)
+    (rdir / "questions.json").unlink(missing_ok=True)
     settings = config.load_settings()["ai"]
     provider = settings["provider"]
     _set_round(node, n, status="running", started=store._now(), provider=provider)
+    lidar_note = _prefetch_lidar(job, node)
+    if lidar_note:
+        brief = build_brief(node, rnd, lidar_note)
+        prompt_file.write_text(brief)
     # Kept so a round can still be finished after an app restart (see recover_rounds).
     (rdir / "design-before.yaml").write_text(node.design_path.read_text() if node.design_path.exists() else "")
     log_path = rdir / "agent.log"
@@ -229,6 +301,94 @@ def run_round(job: Job, node: store.Node, rnd: dict):
                 return _pretty(provider, line)
             _run_provider(job, provider, settings, node, prompt_file, result_file, short, on_line,
                           on_start=lambda pid: _set_round(node, n, agent_pid=pid))
+    except Exception as e:
+        _set_round(node, n, status="failed", finished=store._now(), error=str(e))
+        _finish_requests(node, n, {}, failed=True)
+        raise
+    questions = _read_questions(rdir / "questions.json")
+    if questions and not result_file.exists():
+        # The agent wants answers before it builds: park the round until the homeowner replies.
+        _set_round(node, n, status="awaiting_answers", questions=questions, agent_pid=None,
+                   asked=store._now())
+        job.set_step(f"{display_name()} has {len(questions)} question(s) before building", 1.0)
+        return {"round": n, "questions": len(questions)}
+    return finish_round(job, node, rnd)
+
+
+def _read_questions(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return []
+    qs = data.get("questions", data) if isinstance(data, dict) else data
+    return normalize_questions(qs)
+
+
+def normalize_questions(qs) -> list[dict]:
+    out = []
+    for i, q in enumerate(qs or []):
+        if isinstance(q, str):
+            q = {"text": q}
+        if not isinstance(q, dict) or not str(q.get("text", "")).strip():
+            continue
+        out.append({"id": str(q.get("id") or f"q{i + 1}"), "text": str(q["text"]).strip(),
+                    "why": str(q.get("why") or "").strip(), "default": str(q.get("default") or "").strip()})
+    return out
+
+
+def format_answers(questions: list[dict], answers: dict) -> str:
+    """Q&A as plain text — stored as a frozen input and sent to the agent."""
+    lines = []
+    for q in questions:
+        a = answers.get(q["id"])
+        if a is None or not str(a).strip():
+            a = "Use your best judgement" + (f" (your stated default: {q['default']})" if q.get("default") else "") + "."
+        lines.append(f"Q: {q['text']}\nA: {str(a).strip()}")
+    return "\n\n".join(lines)
+
+
+def answer_round(job: Job, node: store.Node, rnd: dict, answers: dict):
+    """Continue a round that stopped to ask questions: record the answers as a frozen input of that
+    round, then let the agent build (Claude Code resumes the same session)."""
+    n = rnd["n"]
+    rdir = _round_dir(node, n)
+    text = format_answers(rnd.get("questions", []), answers)
+    with store.LOCK:
+        d = node.inputs()
+        import uuid as _uuid
+        d["items"].append({"id": _uuid.uuid4().hex[:10], "type": "spec", "title": f"Answers to {display_name()}'s questions",
+                           "text": text, "folder": "", "files": [], "created": store._now(), "round": n,
+                           "answers_to": n})
+        node.save_inputs(d)
+    (rdir / "answers.txt").write_text(text)
+    settings = config.load_settings()["ai"]
+    provider = rnd.get("provider") or settings["provider"]
+    result_file = rdir / "result.json"
+    message = ("Here are the homeowner's answers to your questions. Now build the design as described in the "
+               f"task file, verify it, and write {result_file}. Don't ask further questions this round.\n\n" + text)
+    sid = session_id_for(node, rnd) if provider == "claude_code" else None
+    if sid:
+        prompt_file, short = None, message
+    else:  # providers without session resume get the whole brief again, plus the answers
+        prompt_file = rdir / "prompt-answers.md"
+        prompt_file.write_text((rdir / "prompt.md").read_text() + "\n\n## The homeowner's answers to your questions\n\n"
+                               + text + "\n\nBuild now; don't ask further questions this round.\n")
+        short = (f"Read the task file {prompt_file} and do exactly what it says. Work in this repository. "
+                 f"Finish by writing {result_file}.")
+    # Keep what was asked separately: `questions` is reused for anything that comes up while building.
+    _set_round(node, n, status="running", answered=store._now(), asked_questions=rnd.get("questions", []),
+               questions=[], answers=answers)
+    try:
+        job.set_step(f"{PROVIDERS[provider]['label']} is building round {n} with your answers", 0.1)
+        with open(rdir / "agent.log", "a") as log:
+            def on_line(line, _log=log):
+                _log.write(line)
+                _log.flush()
+                return _pretty(provider, line)
+            _run_provider(job, provider, settings, node, prompt_file or (rdir / "prompt.md"), result_file, short,
+                          on_line, on_start=lambda pid: _set_round(node, n, agent_pid=pid), resume=sid)
     except Exception as e:
         _set_round(node, n, status="failed", finished=store._now(), error=str(e))
         _finish_requests(node, n, {}, failed=True)
@@ -264,9 +424,15 @@ def finish_round(job: Job, node: store.Node, rnd: dict):
             check = f"{node.state}/plan-check.png"
         except Exception as e:  # noqa: BLE001
             job.say(f"plan check failed: {e}")
+        if "photo_matches" in (node.design_path.read_text() if node.design_path.exists() else ""):
+            job.set_step("Rendering the photo-match check from the model", 0.92)
+            try:
+                job.lv("photomatch", *node.lv_args(), "--output-type", "photo_match")
+            except Exception as e:  # noqa: BLE001
+                job.say(f"photo match failed: {e}")
     _finish_requests(node, n, result)
     _set_round(node, n, status="done", finished=store._now(), summary=result.get("summary", ""),
-               notes=result.get("notes", []), questions=result.get("questions", []),
+               notes=result.get("notes", []), questions=normalize_questions(result.get("questions", [])),
                design_version=v["k"] if v else None, design_changed=changed, issues=issues, check_image=check,
                agent_pid=None)
     return {"round": n, "changed": changed}
@@ -410,15 +576,18 @@ def validate(node: store.Node) -> list[dict]:
 # ---------------------------------------------------------------- providers
 
 
-def _run_provider(job, provider, s, node, prompt_file, result_file, short, on_line, on_start=None):
+def _run_provider(job, provider, s, node, prompt_file, result_file, short, on_line, on_start=None, resume=None):
     repo = config.REPO_ROOT
     model = (s.get("model") or "").strip()
     if provider == "claude_code":
-        cmd = [shutil.which("claude") or "claude", "-p", short, "--output-format", "stream-json", "--verbose",
+        cmd = [shutil.which("claude") or "claude", "-p", short, *(["--resume", resume] if resume else []),
+               "--output-format", "stream-json", "--verbose",
                "--permission-mode", "acceptEdits",
                "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep",
                "Bash(./lv validate:*)", "Bash(./lv check:*)", "Bash(./lv species:*)", "Bash(./lv preview:*)",
                "Bash(./lv plan import:*)", "Bash(./lv --help:*)", "Bash(./lv plan --help:*)",
+               "Bash(./lv photos:*)", "Bash(./lv photomatch:*)", "Bash(./lv lidar fetch:*)", "Bash(./lv lidar info:*)",
+               "Bash(./lv lidar heights:*)", "Bash(./lv lidar image:*)",
                "Bash(ls:*)", "Bash(file:*)", "Bash(pdfinfo:*)", "Bash(magick identify:*)",
                "--add-dir", str(node.project_dir)]
         if model:

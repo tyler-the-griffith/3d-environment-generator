@@ -33,6 +33,14 @@ Two layers:
   (`api_agent.py`: official SDK tool runner, restricted tools, input images/PDFs attached),
   and custom. After the agent (`finish_round`): validate, snapshot a design version, render
   the plan check, record the verdicts on custom requests.
+- Ask before building: the brief lets the agent write `rounds/N/questions.json`
+  (`{id, text, why, default}`) and stop; `run_round` then parks the round as
+  `awaiting_answers` (no new round can start). The input page shows a form; each answer is
+  text or "use your best judgement" (= the agent's stated `default`). `answer_round` records the
+  answers as a frozen input of the *same* round (`answers_to`), moves them to
+  `asked_questions`, and continues: Claude Code resumes its session (`--resume`), other
+  providers get the brief plus the answers. Questions in `result.json` (raised while
+  building) get the same form; answering them starts the next round.
 - Rounds record `agent_pid` and the Claude Code `session_id` (from the stream-json init
   event; `session_id_for` falls back to scanning `~/.claude/projects/<repo>/` transcripts for
   the round's prompt path). "Continue in Claude Code" opens `claude --resume <id>` in a
@@ -52,13 +60,23 @@ Two layers:
   opens at `/envgen` to get the stable app id `chrome-127.0.0.1__envgen-Default` (the
   `.desktop` file's `StartupWMClass`). The menu icon `branding/app-icon.png` is refreshed from
   `logo.png` (or `default-icon.png`) on every launch.
-- `jobs.py`: two lanes (gpu: anything Blender, ai: rounds), subprocess per job, cancellable.
+- `jobs.py`: three lanes (gpu: anything Blender, ai: rounds, net: publishing), subprocess per
+  job, cancellable.
+- `publish.py`: builds a static site from a node's outputs into `renders/_site/<state>/`,
+  styled with the user's theme tokens (sent by the client, validated before going into CSS),
+  stills as web-sized JPEGs, the walkthrough copied with a themed overlay. GitHub Pages via the
+  `gh` CLI: public repo, a separate git checkout in `renders/_site/.deploy-<state>/`, push with a
+  one-shot `gh auth git-credential` helper and a noreply identity (no change to the user's git
+  config). The UI requires an explicit "this is public" confirmation (`confirm_public`).
 - `config.py`: brand (`brand.json`, `branding/logo.png`) and per-user settings in the OS
   config dir (not the repo). `appearance.overrides` is replaced, not merged, on save.
 - `web/`: vanilla ES modules, no build step. `main.js` (state, routing
   `#/n/<id>/<input|output>`, right-click menu), `inputs.js`, `outputs.js`, `outspec.js`
-  (the one "Outputs to make" component used on both pages), `settings.js`, `theme.js`
-  (palettes → CSS variables), `ui.js`. `h()` skips null children, but `replaceChildren()`
+  (the one "Outputs to make" component used on both pages), `publish.js` (the web page
+  widget), `settings.js`, `theme.js` (palettes → CSS variables), `ui.js`. Palettes are
+  generated: `tools/make_palettes.py` turns Coolors palettes into light/dark token sets in
+  OKLab and nudges accent/status lightness until every text pair passes WCAG AA; edit the
+  anchors there and re-run it rather than hand-editing `palettes.js`. `h()` skips null children, but `replaceChildren()`
   doesn't, so filter first. While the user is typing in a pane, refreshes re-render only the
   nav and topbar.
 
@@ -113,6 +131,25 @@ project.yaml ──landviz (core, system python)──▶ resolved scene JSON �
 Keep it that way. A new spec feature is resolved in core into concrete numbers; Blender just
 draws them.
 
+## Accuracy tools (core)
+
+- `roofs.py`: each roof is the lower envelope of per-edge planes over a convex wing footprint
+  (hip, gable, half_hip, gambrel, mansard, shed, flat, custom are just different plane sets),
+  computed in core and passed to Blender as faces plus wall top profiles. Non-convex wings fall
+  back to a bounding-rectangle roof with a warning. Houses are overlapping wings.
+- `photos.py`: EXIF/DJI-XMP reader, FOV from 35 mm-equivalent (diagonal convention),
+  lat/lon ↔ site (`site.location.origin` + `north_offset_deg`). Some exports drop the E/W refs;
+  the site's longitude sign settles it. Digitally zoomed exports report the unzoomed focal
+  length, so `fov` overrides it, and `lv photos --anchor` prints a scale check.
+- `lv photomatch`: `scene["photo_views"]` (resolve) → Blender cameras built from yaw (site-
+  relative), pitch and roll via Rz(-yaw)·Rx(90+pitch)·Rz(roll) → 2×2 sheets. Photo views aren't
+  in the fingerprint.
+- `lidar.py`: bare-earth DEM from the 3DEP `getSamples` endpoint (1000 points per request,
+  parallel); optional point cloud from USGS EPT on AWS (laspy+lazrs from `./launch --setup` into
+  `.venv`, which `launch` and `lv` prefer). DSM is aligned to the DEM by the median offset on
+  ground returns. Terrain type `lidar` samples the DEM relative to the elevation at the site
+  origin. Address geocoding uses the US Census geocoder.
+
 ## Extension points (registries)
 
 | add a… | core | Blender |
@@ -166,7 +203,7 @@ remove it.
 
 - `python3 -m unittest discover -s tests`: core only, under 1 s.
 - `tests/test_app.py`: app rules (freezing, rounds, variant input copies, overlay
-  inheritance through grandchildren, output selection, the brief) against a temporary
+  inheritance through grandchildren, output selection, the brief, questions before building) against a temporary
   projects root. It never touches the real settings file.
 - `tests/test_models.py`: fingerprint invariants (lighting shares a model, geometry
   doesn't), edits merging, and pull-report-to-patch conversion, all without Blender.

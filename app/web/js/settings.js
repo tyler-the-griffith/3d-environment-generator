@@ -1,5 +1,5 @@
 // Settings: per-user preferences shared by every project (Appearance, AI, Projects, Rendering, About).
-import { FONTS, PRESETS, TOKENS, apply as applyTheme, palette, resolvedMode } from "./theme.js";
+import { DEFAULT_PRESET, FONTS, PRESETS, TOKENS, apply as applyTheme, palette, presetKey, resolvedMode } from "./theme.js";
 import { explain, h, icon, modal, toast } from "./ui.js";
 
 export function openSettings(S, A) {
@@ -29,8 +29,11 @@ export function openSettings(S, A) {
           h("button", { class: `btn ${ap.mode === m ? "on" : ""}`, onclick: () => { ap.mode = m; saveAppearance(); draw(); } },
             { system: "Match system", light: "Light", dark: "Dark" }[m]))),
         h("h3", {}, "Palette"),
+        explain("Based on Coolors' trending palettes, each turned into a light and a dark theme with every text color checked for readable contrast. The top strip is the original palette; the bottom shows this mode's background, panels, accent and text."),
         h("div", { class: "swatches" }, Object.entries(PRESETS).map(([k, p]) =>
-          h("button", { class: `swatch ${ap.preset === k ? "on" : ""}`, onclick: () => { ap.preset = k; saveAppearance(); draw(); } },
+          h("button", { class: `swatch ${presetKey(ap) === k ? "on" : ""}`, title: p.source ? `Coolors palette: ${p.source.join(" ").toUpperCase()}` : "",
+            onclick: () => { ap.preset = k; saveAppearance(); draw(); } },
+            p.source ? h("div", { class: "bars src" }, p.source.map((c) => h("i", { style: { background: c } }))) : null,
             h("div", { class: "bars" }, ["bg", "surface-2", "accent", "ink"].map((t) => h("i", { style: { background: p[mode][t] } }))),
             p.label))),
         h("h3", {}, `Colors (${editMode} mode)`),
@@ -74,7 +77,7 @@ export function openSettings(S, A) {
               catch { toast("That file isn't a theme", "error"); }
             } })),
           h("button", { class: "btn danger", onclick: () => {
-            Object.assign(ap, { mode: "system", preset: "moss", overrides: { light: {}, dark: {} }, font_ui: "system", font_mono: "system",
+            Object.assign(ap, { mode: "system", preset: DEFAULT_PRESET, overrides: { light: {}, dark: {} }, font_ui: "system", font_mono: "system",
               font_scale: 1, density: "comfortable", radius: 10, nav_width: 272, reduced_motion: false });
             saveAppearance(); draw();
           } }, icon("refresh"), "Reset appearance")),

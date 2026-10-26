@@ -1,12 +1,12 @@
 /* 3D Environment Generator — app styles.
    Every color comes from a token on :root; theme.js writes the tokens from the chosen preset
-   plus the user's overrides. The defaults below match the "moss" preset. */
+   plus the user's overrides. The defaults below match the default "forest" preset (light). */
 
 :root {
-  --bg: #f5f4ef; --surface: #ffffff; --surface-2: #f0efe8; --surface-3: #e7e5dc;
-  --ink: #1d2420; --muted: #5e6862; --line: #dcd9cf;
-  --accent: #3f7a4a; --accent-ink: #ffffff; --accent-soft: #e2eee2;
-  --ok: #2f7d4c; --warn: #a8650a; --danger: #b3362f; --focus: #3f7a4a;
+  --bg: #f0efeb; --surface: #fbfbfa; --surface-2: #e9e9e4; --surface-3: #e1e2dd;
+  --ink: #334d40; --muted: #5d6a61; --line: #ced2cc;
+  --accent: #50754f; --accent-ink: #f0efeb; --accent-soft: #e3e9e2;
+  --ok: #2a7648; --warn: #985a07; --danger: #b0352e; --focus: #50754f;
   --shadow: 0 1px 2px rgb(0 0 0 / .06), 0 4px 16px rgb(0 0 0 / .06);
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
@@ -65,7 +65,7 @@ code, pre, textarea.code { font-family: var(--font-mono); }
 .tabs { display: flex; gap: 2px; background: var(--surface-2); padding: 3px; border-radius: calc(var(--radius) * .9); }
 .tab { border: 0; background: transparent; padding: 6px 14px; border-radius: calc(var(--radius) * .7); cursor: pointer; color: var(--muted); font-weight: 550; }
 .tab.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
-.crumb { color: var(--muted); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.crumb { color: var(--muted); font-size: .95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 34%; margin-right: 6px; flex: 0 1 auto; min-width: 4em; }
 .crumb b { color: var(--ink); }
 .spacer { flex: 1; }
 
@@ -146,6 +146,12 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .otype.on { background: var(--accent-soft); border-color: var(--accent); }
 .otype.on .box { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .otype .box svg { width: 12px; height: 12px; }
+.advanced { margin-top: 12px; border: 1px solid var(--line); border-radius: calc(var(--radius) * .85); background: var(--surface-2); }
+.advanced-head { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 10px 12px; cursor: pointer; text-align: left; border-radius: inherit; }
+.advanced-head:hover { background: var(--surface-3); }
+.advanced-head svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.advanced-body { padding: 0 12px 12px; }
+.advanced-body .explain { background: var(--surface); }
 .custom-list { margin-top: 10px; display: grid; gap: 6px; }
 .custom { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: calc(var(--radius) * .7); padding: 8px 10px; font-size: .9rem; }
 .custom .msg { color: var(--muted); font-size: .84rem; margin-top: 2px; }
@@ -157,7 +163,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .ocards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 .panes.split .ocards { grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); }
 .ocard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); display: flex; flex-direction: column; }
-.ocover { position: relative; aspect-ratio: 16 / 9; background: var(--surface-3); cursor: pointer; display: block; width: 100%; border: 0; padding: 0; }
+.ocover { position: relative; aspect-ratio: 16 / 9; background: var(--surface-3); cursor: pointer; display: block; width: 100%; border: 0; padding: 0; overflow: hidden; }
 .ocover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .ocover .play { position: absolute; inset: 0; display: grid; place-items: center; }
 .ocover .play span { background: rgb(0 0 0 / .55); color: #fff; border-radius: 999px; padding: 10px 16px; display: inline-flex; gap: 8px; align-items: center; font-weight: 600; font-size: .9rem; }
@@ -244,3 +250,37 @@ table.data th { position: sticky; top: 0; background: var(--surface-2); }
 .provider + .provider { margin-top: 6px; }
 .provider.on { border-color: var(--accent); background: var(--accent-soft); }
 .provider small { grid-column: 2 / 4; color: var(--muted); }
+.swatch .bars.src { height: 10px; margin-bottom: 3px; }
+
+/* ---------------------------------------------------------------- output page layout */
+.pane-inner.wide { max-width: 1480px; }
+.out-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: calc(var(--pad) * 1.6); align-items: start; }
+.out-main > .ogroup:first-child { margin-top: calc(var(--pad) * 1.2); }
+.out-side { position: sticky; top: 0; max-height: calc(100vh - 80px); overflow: auto; padding-bottom: 8px; }
+.out-side .section { margin-top: calc(var(--pad) * 1.2); padding: var(--pad); }
+.out-side .section:first-child { margin-top: calc(var(--pad) * 1.2); }
+.out-side .btn.big { padding: 10px 16px; font-size: 1rem; }
+.out-side .ocards { grid-template-columns: 1fr; }
+.pending-list { display: grid; gap: 8px; }
+.pending-row { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: calc(var(--radius) * .7); padding: 8px 10px; }
+/* Narrow windows and split view: one column, visuals first (controls first while nothing is made). */
+@media (max-width: 1080px) { .out-layout { grid-template-columns: minmax(0, 1fr); } .out-side { position: static; max-height: none; } }
+.panes.split .out-layout { grid-template-columns: minmax(0, 1fr); }
+.panes.split .out-side { position: static; max-height: none; }
+.out-layout.side-first .out-side { order: -1; }
+@media (min-width: 1081px) { .panes:not(.split) .out-layout.side-first .out-side { order: 0; } }
+
+/* ---------------------------------------------------------------- publish widget */
+.publish .pub-fields { display: grid; gap: 8px; }
+.field-label { font-weight: 550; font-size: .88rem; margin: 12px 0 4px; }
+.pub-types { display: grid; gap: 2px; }
+.pub-type { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: .9rem; }
+.pub-type:hover { background: var(--surface-2); }
+.pub-type input { accent-color: var(--accent); margin: 0; }
+.pub-type span:nth-child(2) { flex: 1; }
+.pub-online { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 2px; }
+.pub-live { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: .88rem; min-width: 0; }
+.pub-live a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Narrow windows: top-bar buttons collapse to their icons (titles still explain them). */
+@media (max-width: 1100px) { .topbar .btn .lbl { display: none; } .topbar .btn { padding: 6px 8px; } }

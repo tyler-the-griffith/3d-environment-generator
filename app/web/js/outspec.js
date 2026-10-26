@@ -8,6 +8,20 @@ export function outSpecSection(S, A, where) {
   const spec = S.node.output_spec;
   const types = S.app.output_types;
   const selected = new Set(spec.selected);
+  const PRIMARY = ["stills", "plan_check", "web_walkthrough"];
+  const isPrimary = (t) => (t.primary ?? PRIMARY.includes(t.key));
+  const primary = types.filter(isPrimary);
+  const advanced = types.filter((t) => !isPrimary(t));
+  const advSelected = advanced.filter((t) => selected.has(t.key)).length;
+  const advOpen = !!S.settings.window.advanced_outputs;
+  const toggleAdvanced = () => {
+    S.settings.window.advanced_outputs = !advOpen;  // remembered per user, shared by both pages
+    A.render();
+    A.saveSettings({ window: { advanced_outputs: !advOpen } }).catch(() => {});
+  };
+  const chip = (t) => h("button", { class: `otype ${selected.has(t.key) ? "on" : ""}`, "aria-pressed": selected.has(t.key),
+    title: t.explain, onclick: () => toggle(t.key) },
+    h("span", { class: "box" }, selected.has(t.key) ? icon("check") : null), t.label);
   const save = async (patch) => {
     try {
       const r = await api.put(`/api/nodes/${enc(S.nodeId)}/output-spec`, patch);
@@ -48,10 +62,15 @@ export function outSpecSection(S, A, where) {
       "never frozen: change it any time. Turning a type off only hides its outputs; nothing is deleted, and they come ",
       "back when you turn it on again.",
     ].join("")),
-    h("div", { class: "otypes", role: "group", "aria-label": "Output types" }, types.map((t) =>
-      h("button", { class: `otype ${selected.has(t.key) ? "on" : ""}`, "aria-pressed": selected.has(t.key),
-        title: t.explain, onclick: () => toggle(t.key) },
-        h("span", { class: "box" }, selected.has(t.key) ? icon("check") : null), t.label))),
+    h("div", { class: "otypes", role: "group", "aria-label": "Main outputs" }, primary.map(chip)),
+    h("div", { class: `advanced ${advOpen ? "open" : ""}` },
+      h("button", { class: "advanced-head", "aria-expanded": advOpen, onclick: toggleAdvanced,
+        title: advOpen ? "Hide advanced outputs" : "Show advanced outputs" },
+        icon(advOpen ? "down" : "chevron"), h("b", {}, "Advanced outputs"),
+        h("span", { class: "muted small" }, advSelected ? `${advSelected} selected` : "videos, seasons, growth, panoramas, report…")),
+      advOpen ? h("div", { class: "advanced-body" },
+        explain("Extra outputs made from the same model. Videos and multi-season or multi-year sets take longer to make."),
+        h("div", { class: "otypes", role: "group", "aria-label": "Advanced outputs" }, advanced.map(chip))) : null),
     h("div", { class: "row", style: { marginTop: "12px" } },
       h("label", { class: "field", style: { maxWidth: "260px" } }, h("span", {}, "Detail level"),
         h("select", { onchange: (e) => save({ detail: e.target.value }) },

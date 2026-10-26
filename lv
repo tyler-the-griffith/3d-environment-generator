@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
-# Wrapper so `./landviz ...` works from anywhere without installing the package.
+# Wrapper so `./lv ...` works from anywhere without installing the package.
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m landviz "$@"
+py=python3
+[ -x "$here/.venv/bin/python" ] && py="$here/.venv/bin/python"
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m landviz "$@"

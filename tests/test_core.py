@@ -8,6 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import numpy as np  # noqa: E402
+
 from landviz import geometry, solar, units  # noqa: E402
 from landviz import project as project_mod  # noqa: E402
 from landviz.catalog import Catalog  # noqa: E402
@@ -168,3 +170,58 @@ class Resolve(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoofsAndGeo(unittest.TestCase):
+    def test_roof_types(self):
+        from landviz import roofs
+        rect = [(0, 0), (10, 0), (10, 6), (0, 6)]
+        pitch = math.degrees(math.atan(8 / 12))
+        expect = {"hip": 4, "gable": 2, "half_hip": 4, "shed": 1, "flat": 1, "gambrel": 4, "mansard": 8}
+        for kind, nfaces in expect.items():
+            faces = roofs.roof_faces(rect, 3.0, {"type": kind, "pitch_deg": pitch}, 0.5)
+            self.assertEqual(len(faces), nfaces, kind)
+        ridge = max(z for f in roofs.roof_faces(rect, 3.0, {"type": "gable", "pitch_deg": pitch}) for *_, z in f)
+        self.assertAlmostEqual(ridge, 3.0 + 3 * 8 / 12)  # half-depth 3 m × pitch
+        prof = roofs.wall_profiles(rect, 3.0, {"type": "gable", "pitch_deg": pitch})[1]["profile"]
+        self.assertAlmostEqual(max(z for _, z in prof), 5.0, places=4)  # gable end rises to the ridge
+        self.assertFalse(roofs.is_convex([(0, 0), (4, 0), (4, 4), (2, 2), (0, 4)]))
+
+    def test_wings_resolve(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "project.yaml").write_text(
+                "project: {units: ft}\nsite: {boundary: [[0,0],[100,0],[100,100],[0,100]]}\n"
+                "elements:\n  - id: house\n    kind: structure\n    wings:\n"
+                "      - {footprint: [[0,0],[40,0],[40,28],[0,28]], wall_height: 18, roof: {type: gable, ridge: x}}\n"
+                "      - {footprint: [[24,-14],[40,-14],[40,28],[24,28]], wall_height: 18, roof: {type: hip}}\n"
+                "  - {id: deck, kind: deck, polygon: [[0,28],[20,28],[20,40],[0,40]], height: 6, stairs: [{edge: 1}]}\n")
+            proj = project_mod.load(d)
+            scene = resolve(proj)
+            self.assertFalse([i for i in proj.issues if i.level == "error"])
+            house = next(e for e in scene["elements"] if e["kind"] == "structure")
+            self.assertEqual(len(house["wings"]), 2)
+            self.assertEqual(len(house["wings"][1]["roof_faces"]), 4)
+
+    def test_geo_roundtrip_and_latlon_parsing(self):
+        from landviz import photos
+        origin = (40.5727, -105.1440)
+        for north in (0.0, 17.0):
+            x, y = photos.latlon_to_site(40.5730, -105.1436, origin, north)
+            lat, lon = photos.site_to_latlon(x, y, origin, north)
+            self.assertAlmostEqual(lat, 40.5730, places=7)
+            self.assertAlmostEqual(lon, -105.1436, places=7)
+        self.assertEqual(photos.parse_latlon("40.5729, -105.1437"), (40.5729, -105.1437))
+        lat, lon = photos.parse_latlon("40°34'22.3\"N 105°8'37.5\"W")
+        self.assertAlmostEqual(lon, -105.14375, places=4)
+        self.assertIsNone(photos.parse_latlon("3614 Main Street"))
+        hfov, vfov = photos.fov_deg({"width": 4000, "height": 3000, "f35": 24})
+        self.assertAlmostEqual(hfov, 71.6, delta=0.2)  # 24 mm-equiv on 4:3 = 84° diagonal
+
+    def test_lidar_sampling(self):
+        from landviz import lidar
+        meta = {"radius": 10.0, "res": 1.0, "size": 21, "center": [40.0, -105.0]}
+        E, N = np.meshgrid(np.arange(-10, 11.0), np.arange(-10, 11.0))
+        grid = 100 + 0.5 * E + 0.25 * N  # a tilted plane: bilinear sampling must be exact
+        self.assertAlmostEqual(float(lidar.sample(grid, meta, [3.3], [-2.7])[0]), 100 + 1.65 - 0.675, places=6)
+        e, n = lidar.site_to_local(5.0, 0.0, meta, (40.0, -105.0), 0.0)
+        self.assertAlmostEqual(float(e), 5.0, places=3)

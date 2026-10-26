@@ -2,6 +2,7 @@
 // taken from the output itself. Images and PDFs display inline; tables are previewed.
 import { api, enc } from "./api.js";
 import { outSpecSection } from "./outspec.js";
+import { publishSection } from "./publish.js";
 import { explain, fmtTime, h, icon, lightbox, toast } from "./ui.js";
 
 const csvCache = new Map();
@@ -97,7 +98,7 @@ export function renderOutput(el, S, A) {
         t ? h("button", { class: "btn ghost", disabled: !!genJob || hasErrors, onclick: () => generate([key], true),
           title: "Make this output type again now" }, icon("refresh"), items.length ? "Remake" : "Make") : null),
       t ? explain(t.explain) : null,
-      !items.length ? h("div", { class: "empty" }, `Not made yet. Use “Generate outputs” above, or “Make” for just this type.`)
+      !items.length ? h("div", { class: "empty" }, `Not made yet. Use “Generate outputs”, or “Make” for just this type.`)
         : items.some((o) => o.kind === "pdf" || (o.kind === "file" && o.file.endsWith(".csv")))
           ? items.map((o) => o.kind === "pdf" ? inlinePdf(o) : o.file.endsWith(".csv") ? inlineCsv(o) : h("div", { class: "ocards" }, card(o)))
           : h("div", { class: "ocards" }, items.map(card)));
@@ -107,32 +108,54 @@ export function renderOutput(el, S, A) {
     .reduce((n, k) => n + data.groups[k].length, 0);
   const staleCount = selected.flatMap((k) => data.groups[k] || []).filter((o) => o.stale).length;
 
-  el.replaceChildren(h("div", { class: "pane-inner" },
+  // Visuals first: made types in importance order (the three essentials lead), then a compact
+  // list of selected types that haven't been made yet. Controls live in the side column.
+  const PRIMARY = ["stills", "plan_check", "web_walkthrough"];
+  const ordered = [...PRIMARY.filter((k) => selected.includes(k)), ...selected.filter((k) => !PRIMARY.includes(k))];
+  const made = ordered.filter((k) => (data.groups[k] || []).length);
+  const notMade = ordered.filter((k) => !(data.groups[k] || []).length);
+  const nothingYet = !made.length && !(data.groups.other || []).length;
+
+  const controls = h("div", { class: "section" },
+    h("h2", {}, icon("sparkle"), "Generate & download"),
+    h("div", { class: "row" },
+      h("button", { class: "btn primary big", disabled: !!genJob || hasErrors || neverDesigned, onclick: () => generate(null) },
+        icon("sparkle"), genJob ? "Generating…" : "Generate outputs"),
+      h("a", { class: "btn big", href: `${nodeUrl}/download-all`, title: "Every shown output as a .zip, in folders by type" },
+        icon("download"), "Download all")),
+    staleCount || hiddenCount ? h("div", { class: "row", style: { marginTop: "8px" } },
+      staleCount ? h("span", { class: "chip warn" }, `${staleCount} stale`) : null,
+      hiddenCount ? h("span", { class: "chip", title: "Outputs of types you've turned off; they reappear when you turn them back on" }, `${hiddenCount} hidden`) : null) : null,
+    genJob ? h("div", { style: { marginTop: "10px" } },
+      h("div", { class: "muted small" }, genJob.step || "Starting…"),
+      h("div", { class: "job running" }, h("div", { class: "bar" }, h("i", { style: { width: `${Math.round((genJob.progress || 0) * 100)}%` } }))),
+      h("button", { class: "btn ghost", onclick: () => api.post(`/api/jobs/${genJob.id}/cancel`) }, icon("stop"), "Cancel")) : null,
+    neverDesigned ? h("p", { class: "muted" }, `No design yet: add inputs on the input page and send them to ${S.app.ai_name} first.`)
+      : hasErrors ? h("p", { style: { color: "var(--danger)" } }, "The design file has errors. Fix them on the input page before generating.")
+        : explain("Makes every selected type that's missing or stale and skips anything already up to date. " +
+          "Videos and final-quality images take a while. Progress shows here and under Jobs."));
+
+  const pending = notMade.length ? h("div", { class: "section pending" },
+    h("h2", {}, nothingYet ? "Nothing made yet" : "Selected but not made yet"),
+    h("div", { class: "pending-list" }, notMade.map((k) => h("div", { class: "pending-row" },
+      h("div", { style: { flex: 1, minWidth: 0 } }, h("b", {}, typeInfo[k]?.label || k),
+        h("div", { class: "muted small" }, typeInfo[k]?.explain || "")),
+      h("button", { class: "btn", disabled: !!genJob || hasErrors || neverDesigned, onclick: () => generate([k], true) },
+        icon("sparkle"), "Make"))))) : null;
+
+  const side = h("aside", { class: "out-side" }, controls, publishSection(S, A), outSpecSection(S, A, "output"));
+  const main = h("div", { class: "out-main" },
+    made.map(group),
+    (data.groups.other || []).length ? group("other") : null,
+    pending);
+
+  el.replaceChildren(h("div", { class: "pane-inner wide" },
     h("div", { class: "page-head" },
       h("div", { style: { flex: 1 } }, h("h1", {}, N.meta.title),
         h("div", { class: "sub" }, N.variant ? `Child variant of ${N.parent_title}` : "Base design", " · Output page")),
       h("button", { class: "btn", onclick: () => A.setTab("input") }, icon("chevron"), "Input page")),
     explain("Everything made from this design's 3D model. Click a cover to open it; images and PDFs show right here. " +
       "Every output is taken from the same model, and anything made from an older version of the design is marked stale."),
-    h("div", { class: "section" },
-      h("div", { class: "row" },
-        h("button", { class: "btn primary big", disabled: !!genJob || hasErrors || neverDesigned, onclick: () => generate(null) },
-          icon("sparkle"), genJob ? "Generating…" : "Generate outputs"),
-        h("a", { class: "btn big", href: `${nodeUrl}/download-all`, title: "Every shown output as a .zip, in folders by type" },
-          icon("download"), "Download all"),
-        h("span", { class: "spacer", style: { flex: 1 } }),
-        staleCount ? h("span", { class: "chip warn" }, `${staleCount} stale`) : null,
-        hiddenCount ? h("span", { class: "chip", title: "Outputs of types you've turned off; they reappear when you turn them back on" }, `${hiddenCount} hidden`) : null),
-      genJob ? h("div", { style: { marginTop: "10px" } },
-        h("div", { class: "muted small" }, genJob.step || "Starting…"),
-        h("div", { class: "job running" }, h("div", { class: "bar" }, h("i", { style: { width: `${Math.round((genJob.progress || 0) * 100)}%` } }))),
-        h("button", { class: "btn ghost", onclick: () => api.post(`/api/jobs/${genJob.id}/cancel`) }, icon("stop"), "Cancel")) : null,
-      neverDesigned ? h("p", { class: "muted" }, `No design yet: add inputs on the input page and send them to ${S.app.ai_name} first.`)
-        : hasErrors ? h("p", { style: { color: "var(--danger)" } }, "The design file has errors. Fix them on the input page before generating.")
-          : explain("Generate outputs makes every selected type that's missing or stale and skips anything already up to date. " +
-            "Videos and final-quality images take a while. Progress shows here and under Jobs.")),
-    outSpecSection(S, A, "output"),
-    selected.map(group),
-    (data.groups.other || []).length ? group("other") : null,
+    h("div", { class: `out-layout ${nothingYet ? "side-first" : ""}` }, main, side),
   ));
 }

@@ -53,7 +53,9 @@ def build_terrain(scene, col, quality, heights=None):
 def _cutters(ctx, kinds):
     out = []
     for r in ctx.scene["elements"]:
-        if r["kind"] in kinds:
+        if r["kind"] == "structure" and "structure" in kinds:
+            out += [w["footprint"] for w in r.get("wings", []) if w.get("walls", True)] or [r.get("footprint")]
+        elif r["kind"] in kinds:
             out.append(r.get("polygon") or r.get("footprint"))
         elif r["kind"] == "wall" and "wall" in kinds:
             out.append(ctx.wall_polygon(r))

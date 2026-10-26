@@ -13,3 +13,6 @@ projects/**/app/rounds/*/agent.log
 incoming/
 app/branding/app-icon.png
 app/branding/app-icon.ico
+.venv/
+# Per-user record of where a design was published
+projects/**/app/publish.json

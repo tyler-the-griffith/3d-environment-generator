@@ -1,8 +1,9 @@
 """Background jobs with live progress, plus an event bus the UI listens to (server-sent events).
 
-Two lanes so a long render never blocks the AI (or vice versa):
+Lanes so a long render never blocks the AI (or vice versa):
   "gpu" — anything that runs Blender (builds, renders, video, export). One at a time.
   "ai"  — AI rounds. One at a time.
+  "net" — publishing a web page (copying files, pushing to GitHub). One at a time.
 Every job runs subprocesses (landviz CLI, AI agents) so output is captured per job and a job
 can be cancelled by terminating its process.
 """
@@ -137,7 +138,7 @@ class Job:
 class Manager:
     def __init__(self):
         self.jobs: dict[str, Job] = {}
-        self.lanes = {"gpu": queue.Queue(), "ai": queue.Queue()}
+        self.lanes = {"gpu": queue.Queue(), "ai": queue.Queue(), "net": queue.Queue()}
         for lane, q in self.lanes.items():
             threading.Thread(target=self._worker, args=(q,), daemon=True, name=f"lane-{lane}").start()
 

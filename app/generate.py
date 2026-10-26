@@ -21,6 +21,10 @@ OUTPUT_TYPES = [
      "explain": "The model seen from directly above with the landscaper's drawing laid over it. Anything that "
                 "doesn't line up is a transcription mistake to fix.",
      "needs": "a calibrated plan image"},
+    {"key": "photo_match", "label": "Photo-match check",
+     "explain": "The model rendered from the exact position, heading and lens of your drone photos, shown next to "
+                "and over each photo. Wrong heights, roof shapes and tree positions stand out.",
+     "needs": "`photo_matches` in the design (GPS + heading/tilt per photo)"},
     {"key": "orbit_video", "label": "Fly-around video",
      "explain": "A smooth 12-second circle around the property from above.",
      "needs": "an `orbit` view (added automatically if missing)"},
@@ -53,8 +57,12 @@ OUTPUT_TYPES = [
      "explain": "The 3D model itself (.blend), for opening in Blender or handing to a designer.",
      "needs": "nothing extra"},
 ]
+# The essentials, shown up front; everything else sits under "Advanced outputs" in the UI.
+PRIMARY = ("stills", "plan_check", "web_walkthrough")
+for _t in OUTPUT_TYPES:
+    _t["primary"] = _t["key"] in PRIMARY
 TYPE_KEYS = [t["key"] for t in OUTPUT_TYPES]
-ORDER = ["stills", "plan_check", "panorama", "seasons", "growth", "dusk", "model_file", "web_walkthrough",
+ORDER = ["stills", "plan_check", "photo_match", "panorama", "seasons", "growth", "dusk", "model_file", "web_walkthrough",
          "orbit_video", "walk_video", "plant_list", "report"]
 
 
@@ -125,6 +133,12 @@ def run(job: Job, node: store.Node, keys: list[str] | None, force: bool = False)
                 job.lv("render", *base, *q, *t)
             elif key == "plan_check":
                 job.lv("check", *base, *t)
+            elif key == "photo_match":
+                if not (scene.get("photo_views") or []):
+                    problems.append(f"{label}: the design has no usable photo matches yet. Send a round to "
+                                    f"{_ai_name()} with drone photos (it sets them up when this output is selected).")
+                    continue
+                job.lv("photomatch", *base, *t)
             elif key == "panorama":
                 panos = [v["name"] for v in scene["views"] if v["preset"] == "pano"]
                 extra = [] if panos else ["--extra-view", json.dumps(default_views(node)["pano"])]

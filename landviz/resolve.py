@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 import zlib
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -163,10 +164,26 @@ def _terrain(project: Project) -> dict:
         z = tps(np.column_stack([gx.ravel(), gy.ravel()]))
         # Flatten far outside the site toward the edge mean so the horizon isn't a cliff.
         heights = [round(float(v), 4) for v in z]
+    elif kind == "lidar":
+        # Measured bare earth from derived/lidar (lv lidar fetch), placed via site.location.origin.
+        from . import lidar
+        ldir = project.derived / "lidar"
+        if not (ldir / "lidar.npz").exists():
+            raise SpecError("site.terrain.type is lidar but there's no LiDAR data yet — run `lv lidar fetch`")
+        origin, north = site_origin(project)
+        if origin is None:
+            raise SpecError("site.terrain.type lidar needs site.location.origin (lat/lon of site 0,0)")
+        grids, meta = lidar.load(ldir)
+        gx, gy = np.meshgrid(np.linspace(x0, x0 + (nx - 1) * res, nx), np.linspace(y0, y0 + (ny - 1) * res, ny))
+        E, N = lidar.site_to_local(gx.ravel(), gy.ravel(), meta, origin, north)
+        z = lidar.sample(grids["dem"], meta, E, N)
+        e0, n0 = lidar.site_to_local(0.0, 0.0, meta, origin, north)
+        z0 = float(lidar.sample(grids["dem"], meta, [e0], [n0])[0])
+        heights = [round(float(v - z0 + project.length(t.get("offset"), 0.0)), 4) for v in z]
     elif kind == "scan":
         heights = None  # Blender derives ground from the scan mesh (see builders/terrain.py)
     else:
-        raise SpecError(f"site.terrain.type must be flat | graded | scan, not {kind!r}")
+        raise SpecError(f"site.terrain.type must be flat | graded | lidar | scan, not {kind!r}")
     return {"type": kind, "x0": x0, "y0": y0, "res": res, "nx": nx, "ny": ny, "heights": heights,
             "base_material": t.get("material", "lawn"), "scan_element": t.get("scan_element")}
 
@@ -242,6 +259,81 @@ def _views(project: Project, boundary) -> list[dict]:
     return out
 
 
+def site_origin(project: Project):
+    """(lat, lon) of site (0, 0), and the site's north offset — or (None, offset) if not geo-referenced."""
+    loc = (project.spec.get("site", {}) or {}).get("location", {}) or {}
+    north = float(loc.get("north_offset_deg", 0.0))
+    o = loc.get("origin")
+    return ((float(o[0]), float(o[1])) if o else None), north
+
+
+def _photo_views(project: Project) -> list[dict]:
+    """Cameras that re-create real photos (photo-match check). GPS → position, DJI XMP or the
+    design → heading/tilt, EXIF focal length → field of view."""
+    from . import photos
+    pm = project.spec.get("photo_matches") or {}
+    items = pm.get("photos") or []
+    if not items:
+        return []
+    origin, north = site_origin(project)
+    ref = pm.get("altitude_ref") or {}
+    ref_alt = None
+    if ref.get("photo"):
+        try:
+            ref_alt = photos.read(project.path(ref["photo"])).get("alt")
+        except OSError:
+            project.issues.append(Issue("warning", "photo_matches", f"altitude_ref photo not found: {ref['photo']}"))
+    ref_z = project.length(ref.get("z"), 0.0)
+    takeoff_z = project.length(ref.get("takeoff_z"), None)
+    out = []
+    for i, it in enumerate(items):
+        where = f"photo_matches[{i}]"
+        f = project.path(it.get("file", ""))
+        if not f.exists():
+            project.issues.append(Issue("warning", where, f"photo not found: {it.get('file')}"))
+            continue
+        info = photos.read(f)
+        if "position" in it:
+            pos = list(project.pt(it["position"]))
+            if len(pos) < 3:
+                project.issues.append(Issue("warning", where, "position needs [x, y, z]"))
+                continue
+        else:
+            if origin is None or "lat" not in info:
+                project.issues.append(Issue("warning", where, "no position: set site.location.origin (lat/lon of "
+                                            "site 0,0) so GPS can be used, or give position: [x, y, z]"))
+                continue
+            lat, lon = info["lat"], info["lon"]
+            if info.get("lon_ref_missing") and (origin[1] < 0) != (lon < 0):
+                lon = -lon  # export dropped the E/W ref; the site's own longitude settles it
+            x, y = photos.latlon_to_site(lat, lon, origin, north)
+            if ref_alt is not None and info.get("alt") is not None:
+                z = info["alt"] - ref_alt + ref_z
+            elif takeoff_z is not None and info.get("rel_alt") is not None:
+                z = info["rel_alt"] + takeoff_z
+            else:
+                project.issues.append(Issue("warning", where, "no camera height: set photo_matches.altitude_ref "
+                                            "({photo: <ground photo>, z: <its height>}) or give position"))
+                continue
+            pos = [x, y, z]
+        yaw = it.get("yaw", info.get("gimbal_yaw", info.get("flight_yaw")))
+        pitch = it.get("pitch", info.get("gimbal_pitch"))
+        if yaw is None or pitch is None:
+            project.issues.append(Issue("warning", where, "heading/tilt unknown (no DJI gimbal data in this file): "
+                                        "set yaw (compass degrees) and pitch (-90 = straight down)"))
+            continue
+        hfov, vfov = photos.fov_deg(info, it.get("fov"))
+        w, h = info.get("width") or 4000, info.get("height") or 3000
+        scale = 1600 / max(w, h)
+        out.append({"name": it.get("name") or Path(str(f)).stem[:40], "preset": "photo", "photo": str(f),
+                    "position": pos, "target": [pos[0], pos[1], pos[2] - 1], "position_above_ground": False,
+                    "target_above_ground": False, "yaw_deg": float(yaw) - north, "pitch_deg": float(pitch),
+                    "roll_deg": float(it.get("roll", info.get("gimbal_roll", 0.0))), "hfov_deg": hfov,
+                    "resolution": [int(w * scale), int(h * scale)], "lens": 24, "ortho": False, "animation": None,
+                    "dof": None})
+    return out
+
+
 def resolve(project: Project) -> dict:
     spec = project.spec
     project.issues.clear()
@@ -314,6 +406,7 @@ def resolve(project: Project) -> dict:
         "species": species,
         "elements": sorted(records, key=lambda e: e["layer"]),
         "views": views,
+        "photo_views": _photo_views(project),
         "issues": [vars(i) for i in project.issues],
     }
 

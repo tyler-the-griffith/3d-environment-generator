@@ -4,6 +4,7 @@ import { renderInput } from "./inputs.js";
 import { renderJobs, jobsBadge } from "./jobs.js";
 import { renderNav } from "./nav.js";
 import { renderOutput } from "./outputs.js";
+import { refreshPublish } from "./publish.js";
 import { openSettings } from "./settings.js";
 import { apply as applyTheme } from "./theme.js";
 import { contextMenu, h, icon, toast } from "./ui.js";
@@ -41,6 +42,7 @@ export const actions = {
   async refreshOutputs() {
     if (!S.nodeId) return;
     try { S.outputs = await api.get(`/api/nodes/${enc(S.nodeId)}/outputs`); } catch { S.outputs = null; }
+    await refreshPublish(S);
   },
   async refreshTree() { S.tree = (await api.get("/api/tree")).tree; },
   async saveSettings(patch) {
@@ -93,21 +95,21 @@ function renderTopbar() {
   const explainOn = S.settings.appearance.show_explanations !== false;
   const running = [...S.jobs.values()].filter((j) => j.status === "running" || j.status === "queued").length;
   bar.replaceChildren(...[
+    S.node ? h("div", { class: "crumb" }, S.node.parent_title ? `${S.node.parent_title} › ` : "",
+      h("b", {}, S.node.meta.title)) : h("div", { class: "crumb" }, h("b", {}, S.app.brand.name)),
     S.node ? h("div", { class: "tabs", role: "tablist" },
       ["input", "output"].map((t) => h("button", {
         class: `tab ${S.tab === t ? "active" : ""}`, role: "tab",
         "aria-selected": S.tab === t, title: t === "input" ? "What the design is made from" : "Everything made from the model",
         onclick: () => actions.setTab(t) }, t === "input" ? "Input" : "Output"))) : null,
-    S.node ? h("div", { class: "crumb" }, S.node.parent_title ? `${S.node.parent_title} › ` : "",
-      h("b", {}, S.node.meta.title)) : h("div", { class: "crumb" }, h("b", {}, S.app.brand.name)),
-    h("span", { class: "spacer" }),
     S.node ? h("button", { class: `btn ${S.split ? "on" : ""}`, onclick: actions.toggleSplit,
-      title: "Show the input and output pages side by side" }, icon("split"), S.split ? "Unsplit" : "Split view") : null,
+      title: "Show the input and output pages side by side" }, icon("split"), h("span", { class: "lbl" }, S.split ? "Unsplit" : "Split view")) : null,
     h("button", { class: `btn ${explainOn ? "" : "on"}`, onclick: actions.toggleExplain,
       title: "Hide or show the explanation text (also on right-click)" },
-      icon(explainOn ? "eyeoff" : "eye"), explainOn ? "Hide explanations" : "Show explanations"),
+      icon(explainOn ? "eyeoff" : "eye"), h("span", { class: "lbl" }, explainOn ? "Hide explanations" : "Show explanations")),
+    h("span", { class: "spacer" }),
     h("button", { class: "btn", onclick: () => { S.drawerOpen = !S.drawerOpen; renderJobs(S, actions); },
-      title: "Background jobs: AI rounds, renders, videos" }, icon("jobs"), "Jobs", running ? jobsBadge(running) : null),
+      title: "Background jobs: AI rounds, renders, videos" }, icon("jobs"), h("span", { class: "lbl" }, "Jobs"), running ? jobsBadge(running) : null),
     h("button", { class: "btn icon", onclick: () => openSettings(S, actions), title: "Settings", "aria-label": "Settings" }, icon("gear")),
   ].filter(Boolean));
 }

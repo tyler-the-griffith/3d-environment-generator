@@ -22,7 +22,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import ai, config, generate, store
+from . import ai, config, generate, publish, store
 from .jobs import BUS, MANAGER
 
 TOKEN = secrets.token_urlsafe(24)
@@ -136,6 +136,9 @@ def api_node(h, m):
         "versions": n.versions(), "issues": ai.validate(n),
         "check_image": f"/files/{renders_rel}/{n.state}/plan-check.png?v={int(check.stat().st_mtime)}"
         if check.exists() else None,
+        "photo_matches": [f"/files/{renders_rel}/{n.state}/photo-match/{f.name}?v={int(f.stat().st_mtime)}"
+                          for f in sorted((n.project_dir / "renders" / n.state / "photo-match").glob("*.png"))
+                          if not f.name.endswith(".model.png")],
         "busy": [j.public() for j in MANAGER.busy_for(n.id)],
         "unpulled_edits": _unpulled(n),
         "files_root": f"/files/{n.dir.relative_to(config.projects_root()).as_posix()}/app",
@@ -278,6 +281,50 @@ def api_retry(h, m):
     return {"job": job.public()}
 
 
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/rounds/(?P<rn>\d+)/answers")
+def api_answers(h, m):
+    """Answers to the questions the AI asked before building; continues the same round."""
+    n = node_or_404(m["nid"])
+    rnd = next((r for r in n.inputs()["rounds"] if r["n"] == int(m["rn"])), None)
+    if not rnd:
+        raise ApiError(404, "no such round")
+    answers = h.json().get("answers") or {}
+    prov = ai.provider_status()[config.load_settings()["ai"]["provider"]]
+    if not prov["available"]:
+        raise ApiError(409, f"{prov['label']} isn't ready: {prov['status']} (Settings → AI)")
+    if rnd["status"] == "awaiting_answers":
+        with store.LOCK:  # claim the round so a double click can't start it twice
+            d = n.inputs()
+            cur = next(r for r in d["rounds"] if r["n"] == rnd["n"])
+            if cur["status"] != "awaiting_answers":
+                raise ApiError(409, "these answers were already sent")
+            cur["status"] = "queued"
+            n.save_inputs(d)
+        job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: round {rnd['n']} (with your answers) — "
+                             f"{n.meta()['title']}", lambda job: ai.answer_round(job, n, rnd, answers), lane="ai")
+        BUS.publish("node_changed", {"node": n.id})
+        return {"job": job.public()}
+    if rnd["status"] == "done" and rnd.get("questions") and not rnd.get("questions_answered"):
+        # Questions raised while building: the answers become a new input and the next round starts.
+        text = ai.format_answers(ai.normalize_questions(rnd["questions"]), answers)
+        store.add_input(n, "spec", title=f"Answers to {ai.display_name()}'s questions (round {rnd['n']})", text=text)
+        with store.LOCK:
+            d = n.inputs()
+            for r in d["rounds"]:
+                if r["n"] == rnd["n"]:
+                    r["questions_answered"] = True
+            n.save_inputs(d)
+        try:
+            new = ai.start_round(n, "design")
+        except ValueError as e:
+            raise ApiError(409, str(e)) from None
+        job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: round {new['n']} — {n.meta()['title']}",
+                             lambda job: ai.run_round(job, n, new), lane="ai")
+        BUS.publish("node_changed", {"node": n.id})
+        return {"job": job.public(), "round": new}
+    raise ApiError(409, "this round isn't waiting for answers")
+
+
 @route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/rounds/(?P<rn>\d+)/continue")
 def api_continue(h, m):
     n = node_or_404(m["nid"])
@@ -382,6 +429,64 @@ def api_download_all(h, m):
                     name = f"{o['label']}{src.suffix}".replace("·", "-").replace("/", "-")
                     z.write(src, f"{proj_title}/{node_title}/{folder}/{name}")
     h.send_file(tmp, f"{proj_title} - {node_title}.zip", "application/zip", delete=True)
+    return None
+
+
+# ---------------------------------------------------------------- publishing a web page
+
+
+@route("GET", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/publish")
+def api_publish_status(h, m):
+    return publish.status(node_or_404(m["nid"]))
+
+
+def _publish_options(b: dict) -> dict:
+    return {"title": str(b.get("title") or "")[:200], "subtitle": str(b.get("subtitle") or "")[:400],
+            "types": [t for t in (b.get("types") or []) if t in publish.PAGE_ORDER], "theme": b.get("theme") or {}}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/publish/build")
+def api_publish_build(h, m):
+    n = node_or_404(m["nid"])
+    opts = _publish_options(h.json())
+    job = MANAGER.submit("publish", n.id, f"Web page — {n.meta()['title']}",
+                         lambda job: str(publish.build_site(job, n, opts)), lane="net")
+    return {"job": job.public()}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/publish/github")
+def api_publish_github(h, m):
+    n = node_or_404(m["nid"])
+    b = h.json()
+    if b.get("confirm_public") is not True:
+        raise ApiError(400, "publishing to GitHub Pages makes the page public; confirm first")
+    opts = _publish_options(b)
+    job = MANAGER.submit("publish", n.id, f"Publish to GitHub Pages — {n.meta()['title']}",
+                         lambda job: publish.publish_github(job, n, str(b.get("repo") or ""), opts), lane="net")
+    return {"job": job.public()}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/publish/takedown")
+def api_publish_takedown(h, m):
+    n = node_or_404(m["nid"])
+    job = MANAGER.submit("publish", n.id, f"Take web page offline — {n.meta()['title']}",
+                         lambda job: publish.take_down(job, n), lane="net")
+    return {"job": job.public()}
+
+
+@route("GET", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/publish/download")
+def api_publish_download(h, m):
+    n = node_or_404(m["nid"])
+    site = publish.site_dir(n)
+    if not (site / "index.html").exists():
+        raise ApiError(404, "build the web page first")
+    name = re.sub(r'[\\/:*?"<>|]+', "-", (publish.record(n).get("options") or {}).get("title") or n.meta()["title"])
+    tmp = Path(tempfile.mkstemp(suffix=".zip")[1])
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(site.rglob("*")):
+            if f.is_file():
+                z.write(f, f"{name} (web page)/{f.relative_to(site).as_posix()}")
+    h.send_file(tmp, f"{name} - web page.zip", "application/zip", delete=True)
     return None
 
 

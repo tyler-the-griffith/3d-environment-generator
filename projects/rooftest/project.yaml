@@ -1,0 +1,39 @@
+# Roof and deck showcase / regression test: every roof type, overlapping wings, a porch and a deck.
+project: {name: Roof Test, units: ft}
+site:
+  location: {lat: 40.5853, lon: -105.0844, utc_offset: -6, origin: [40.5853, -105.0844]}
+  boundary: [[-10, -10], [190, -10], [190, 90], [-10, 90]]
+  terrain: {type: flat}
+elements:
+  - id: lawn
+    kind: lawn
+    polygon: [[-10, -10], [190, -10], [190, 90], [-10, 90]]
+  # L-shaped house: two gable wings crossing (valley where they meet), plus a hipped porch
+  - id: house
+    kind: structure
+    colors: {walls: "#d8cbb4", roof: "#5a4636"}
+    floor_raise: 1.5
+    wings:
+      - {footprint: [[0, 0], [40, 0], [40, 28], [0, 28]], wall_height: 18, roof: {type: gable, pitch: 8/12, ridge: x}}
+      - {footprint: [[24, -14], [40, -14], [40, 28], [24, 28]], wall_height: 18, roof: {type: gable, pitch: 8/12, ridge: y}}
+      - {footprint: [[4, -8], [24, -8], [24, 0], [4, 0]], wall_height: 9, walls: false, roof: {type: shed, pitch: 3/12, low_edge: 0}}
+    windows:
+      - {wing: 0, edge: 0, at: 0.3, count: 2, spacing: 6, width: 3, height: 4.5}
+    doors:
+      - {wing: 0, edge: 0, at: 0.5, width: 3.5, height: 7}
+  - {id: hip,      kind: structure, footprint: [[60, 0], [84, 0], [84, 18], [60, 18]],  wall_height: 10, roof: {type: hip, pitch: 6/12}}
+  - {id: halfhip,  kind: structure, footprint: [[95, 0], [119, 0], [119, 18], [95, 18]], wall_height: 10, roof: {type: half_hip, pitch: 8/12}}
+  - {id: gambrel,  kind: structure, footprint: [[130, 0], [154, 0], [154, 18], [130, 18]], wall_height: 10, roof: {type: gambrel, pitch: 4/12}}
+  - {id: mansard,  kind: structure, footprint: [[60, 40], [84, 40], [84, 58], [60, 58]], wall_height: 10, roof: {type: mansard, pitch: 3/12}}
+  - {id: flat,     kind: structure, footprint: [[95, 40], [119, 40], [119, 58], [95, 58]], wall_height: 12, roof: {type: flat, parapet: 2}}
+  - {id: shed,     kind: structure, footprint: [[130, 40], [154, 40], [154, 58], [130, 58]], wall_height: 10, roof: {type: shed, pitch: 4/12}}
+  - id: deck
+    kind: deck
+    polygon: [[0, 28], [20, 28], [20, 42], [0, 42]]
+    height: 6
+    railing: {style: balusters}
+    stairs: [{edge: 1, at: 0.5, width: 4}]
+views:
+  - {name: aerial, preset: aerial, azimuth: 210, elevation: 30, zoom: 0.8}
+  - {name: house, preset: aerial, azimuth: 225, elevation: 22, target: [25, 10], distance: 110}
+render: {quality: draft, resolution: [1280, 720], season: summer, time: "15:00"}

@@ -73,6 +73,17 @@ def make_camera(view: dict, ground, res):
         tgt.z += ground.z(tgt.x, tgt.y)
     pos.z = max(pos.z, ground.z(pos.x, pos.y) + 0.3)
     obj.location = pos
+    if view.get("preset") == "photo":
+        # Re-create a real photo's camera: heading (clockwise from site +Y), tilt, roll, horizontal FOV.
+        from mathutils import Matrix
+        cam.sensor_fit = "HORIZONTAL"
+        cam.angle = math.radians(view["hfov_deg"])
+        obj.location = Vector(view["position"])
+        R = (Matrix.Rotation(-math.radians(view["yaw_deg"]), 4, "Z")
+             @ Matrix.Rotation(math.radians(90 + view["pitch_deg"]), 4, "X")
+             @ Matrix.Rotation(math.radians(view.get("roll_deg", 0.0)), 4, "Z"))
+        obj.matrix_world = Matrix.Translation(obj.location) @ R
+        return obj
     if view.get("pano"):
         cam.type = "PANO"
         cam.panorama_type = "EQUIRECTANGULAR"

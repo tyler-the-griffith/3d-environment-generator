@@ -62,7 +62,7 @@ export function renderInput(el, S, A) {
           oninput: (e) => patch({ title: e.target.value }) }),
         h("button", { class: "btn ghost icon", title: "Remove this input", onclick: () => removeItem(it) }, icon("trash"))),
       explain(t.explain || ""),
-      t.text ? h("textarea", { rows: 4, placeholder: it.type === "location" ? "e.g. 123 Elm St, Columbus OH — north is up on the plan" : "Write it in your own words…",
+      t.text ? h("textarea", { rows: it.type === "lidar" ? 2 : 4, placeholder: t.placeholder || (it.type === "location" ? "e.g. 123 Elm St, Columbus OH — north is up on the plan" : "Write it in your own words…"),
         oninput: (e) => patch({ text: e.target.value }) }, it.text || "") : null,
       t.accepts ? drop : null,
       t.folder ? h("label", { class: "field", style: { marginTop: "8px" } },
@@ -101,7 +101,8 @@ export function renderInput(el, S, A) {
   const statusChip = (r) => ({ queued: h("span", { class: "chip warn" }, "queued"),
     running: h("span", { class: "chip warn" }, "working…"), done: h("span", { class: "chip ok" }, "done"),
     failed: h("span", { class: "chip danger" }, "failed"), cancelled: h("span", { class: "chip" }, "cancelled"),
-    interrupted: h("span", { class: "chip warn", title: "The app was closed before this round finished" }, "interrupted") }[r.status]);
+    interrupted: h("span", { class: "chip warn", title: "The app was closed before this round finished" }, "interrupted"),
+    awaiting_answers: h("span", { class: "chip warn" }, "needs your answers") }[r.status]);
 
   const continueRound = async (r) => {
     try {
@@ -137,6 +138,53 @@ export function renderInput(el, S, A) {
         } }, icon("refresh"), "Retry round") : null));
   };
 
+  // ---------------------------------------------------------- questions from the AI
+  const normQ = (qs) => (qs || []).map((q, i) => typeof q === "string" ? { id: `q${i + 1}`, text: q, why: "", default: "" } : q);
+  const awaiting = rounds.find((r) => r.status === "awaiting_answers");
+  const lastDone = [...rounds].reverse().find((r) => r.status === "done");
+  const followUp = !awaiting && lastDone && lastDone === lastRound && (lastDone.questions || []).length
+    && !lastDone.questions_answered ? lastDone : null;
+
+  const questionForm = (r, before) => {
+    const qs = normQ(r.questions);
+    const key = `${S.nodeId}:${r.n}`;
+    S.qa = S.qa || {};
+    const st = S.qa[key] = S.qa[key] || Object.fromEntries(qs.map((q) => [q.id, { text: "", judge: false }]));
+    const ready = () => qs.every((q) => st[q.id].judge || st[q.id].text.trim());
+    const sendBtn = h("button", { class: "btn primary big", disabled: !ready(), onclick: async () => {
+      const answers = Object.fromEntries(qs.map((q) => [q.id, st[q.id].judge ? null : st[q.id].text.trim()]));
+      try {
+        await api.post(`${nodeUrl}/rounds/${r.n}/answers`, { answers });
+        delete S.qa[key];
+        toast(before ? `Answers sent — ${S.app.ai_name} is building round ${r.n}` : `Answers sent as round ${r.n + 1}`);
+        await A.refreshNode(); A.render();
+      } catch (e) { toast(e.message, "error"); }
+    } }, icon("send"), before ? "Send answers and build" : `Send answers (starts round ${r.n + 1})`);
+    const refresh = () => { sendBtn.disabled = !ready(); };
+    const allJudge = () => { qs.forEach((q) => { st[q.id].judge = true; }); A.render(); };
+    return h("div", { class: "section", style: { borderColor: "var(--accent)" } },
+      h("h2", {}, icon("info"), before ? `${S.app.ai_name} has questions before building` : `${S.app.ai_name} asks`,
+        h("span", { class: "count" }, `round ${r.n}`)),
+      explain(before
+        ? `${S.app.ai_name} stopped before building the model because these answers would change it. Answer what you know; for the rest, choose “Exercise your best judgement” and it uses the assumption shown. Your answers are kept with this round's inputs.`
+        : `Questions that came up while building round ${r.n}. Answering sends them as a new input and starts the next round.`),
+      qs.map((q, i) => {
+        const ta = h("textarea", { rows: 2, placeholder: "Your answer…", disabled: st[q.id].judge,
+          oninput: (e) => { st[q.id].text = e.target.value; refresh(); } }, st[q.id].text);
+        return h("div", { class: "card", style: { marginTop: "8px" } },
+          h("div", { style: { fontWeight: 600 } }, `${i + 1}. ${q.text}`),
+          q.why ? h("div", { class: "muted small", style: { margin: "2px 0 6px" } }, q.why) : null,
+          ta,
+          h("label", { class: "row small", style: { marginTop: "6px", gap: "6px", cursor: "pointer" } },
+            h("input", { type: "checkbox", checked: st[q.id].judge, onchange: (e) => {
+              st[q.id].judge = e.target.checked; ta.disabled = e.target.checked; refresh(); } }),
+            h("span", {}, h("b", {}, "Exercise your best judgement"),
+              q.default ? h("span", { class: "muted" }, ` — ${S.app.ai_name} will assume: ${q.default}`) : null)));
+      }),
+      h("div", { class: "row", style: { marginTop: "12px" } },
+        sendBtn, h("button", { class: "btn", onclick: allJudge }, icon("sparkle"), "Exercise your best judgement on all")));
+  };
+
   // ---------------------------------------------------------- review of the latest round
   const review = () => {
     const r = [...rounds].reverse().find((x) => x.status === "done");
@@ -150,14 +198,25 @@ export function renderInput(el, S, A) {
         "to correct with a new input."),
       r?.summary ? h("p", {}, r.summary) : null,
       r?.notes?.length ? h("div", {}, h("b", {}, "Notes"), h("ul", {}, r.notes.map((n) => h("li", {}, n)))) : null,
-      r?.questions?.length ? h("div", {}, h("b", {}, `${S.app.ai_name} asks`),
-        h("ul", {}, r.questions.map((q) => h("li", {}, q))),
-        h("p", { class: "muted small" }, "Answer these with a new Specification / notes input.")) : null,
+      r?.asked_questions?.length ? h("div", {}, h("b", {}, "Asked before building"),
+        h("ul", {}, normQ(r.asked_questions).map((q) => h("li", {}, q.text,
+          h("div", { class: "muted small" }, r.answers && r.answers[q.id] ? `Answer: ${r.answers[q.id]}` : "Answer: use your best judgement"))))) : null,
+      r?.questions?.length && r.questions_answered ? h("div", {}, h("b", {}, `${S.app.ai_name} asked`),
+        h("ul", {}, normQ(r.questions).map((q) => h("li", {}, q.text))),
+        h("p", { class: "muted small" }, "Answered in the next round.")) : null,
       N.issues.length ? h("ul", { class: "issues" }, [...errors, ...warns].slice(0, 12).map((i) =>
         h("li", {}, h("span", { class: `chip ${i.level === "error" ? "danger" : "warn"}` }, i.level), h("span", {}, `${i.where}: ${i.message}`))))
         : h("p", { class: "muted small" }, "The design file validates cleanly."),
       N.check_image ? h("img", { class: "check-img", src: N.check_image, alt: "Plan check",
-        onclick: () => lightbox({ title: "Plan check: model with plan overlay", kind: "image", url: N.check_image }) }) : null,
+        onclick: () => lightbox({ items: reviewImages(), index: 0 }) }) : null,
+      (N.photo_matches || []).length ? h("div", {},
+        h("h3", { style: { margin: "14px 0 4px", fontSize: ".95rem" } }, "Photo-match check"),
+        explain("The model rendered from each drone photo's exact camera, next to and over the photo. Red lines are the " +
+          "model's edges: where they miss the real roofs, walls and trees, the model is off."),
+        h("div", { class: "ocards" }, N.photo_matches.map((u, i) => h("button", { class: "ocover",
+          style: { borderRadius: "var(--radius)", overflow: "hidden" }, title: "Open (← / → to browse)",
+          onclick: () => lightbox({ items: reviewImages(), index: (N.check_image ? 1 : 0) + i }) },
+          h("img", { src: u, alt: "Photo match", loading: "lazy" }))))) : null,
       h("div", { class: "row", style: { marginTop: "12px" } },
         h("button", { class: "btn primary", disabled: errors.length > 0 || N.busy.some((j) => j.kind === "generate"),
           onclick: generate }, icon("sparkle"), "Generate outputs"),
@@ -167,6 +226,12 @@ export function renderInput(el, S, A) {
           title: "Carry hand edits made in Blender into the design" }, icon("pull"),
           N.unpulled_edits ? "Pull Blender edits (unsaved changes found)" : "Pull Blender edits")));
   };
+
+  const reviewImages = () => [
+    ...(N.check_image ? [{ title: "Plan check: model with plan overlay", kind: "image", url: N.check_image, download: N.check_image }] : []),
+    ...(N.photo_matches || []).map((u) => ({ title: `Photo match: ${decodeURIComponent(u.split("/").pop().split(".png")[0])}`,
+      kind: "image", url: u, download: u })),
+  ];
 
   const generate = async () => {
     try { await api.post(`${nodeUrl}/generate`, {}); toast("Generating outputs…"); A.setTab("output"); }
@@ -213,10 +278,11 @@ export function renderInput(el, S, A) {
 
   // ---------------------------------------------------------- send bar
   const pendingReq = N.output_spec.custom.filter((c) => c.status === "pending").length;
-  const hasContent = drafts.some((i) => (i.text || "").trim() || i.files.length || (i.folder || "").trim());
+  const hasContent = drafts.some((i) => (i.text || "").trim() || i.files.length || (i.folder || "").trim() || i.type === "lidar");
   const provider = S.app.providers[S.settings.ai.provider];
   let why = "";
   if (working) why = `${S.app.ai_name} is working on round ${lastRound.n}.`;
+  else if (awaiting) why = `Answer ${S.app.ai_name}'s questions above (or let it use its best judgement) to continue round ${awaiting.n}.`;
   else if (!provider?.available) why = `${provider?.label || "The AI provider"} isn't ready: ${provider?.status}. See Settings → AI.`;
   else if (!drafts.length && !pendingReq) why = rounds.length ? "Add a new input or an output request to send another round." : "Add at least one input first.";
   else if (drafts.length && !hasContent) why = "Your new inputs are empty: add text or files.";
@@ -244,7 +310,9 @@ export function renderInput(el, S, A) {
       h("p", { class: "muted" }, aiJob?.step || "Starting…"),
       h("pre", { class: "mono", style: { whiteSpace: "pre-wrap", maxHeight: "160px", overflow: "auto" } }, (aiJob?.log_tail || []).join("\n")),
       aiJob ? h("button", { class: "btn", onclick: () => api.post(`/api/jobs/${aiJob.id}/cancel`) }, icon("stop"), "Cancel") : null) : null,
+    awaiting ? questionForm(awaiting, true) : null,
     review(),
+    followUp ? questionForm(followUp, false) : null,
     rounds.length ? h("div", { class: "section" },
       h("h2", {}, icon("lock"), "Sent inputs", h("span", { class: "count" }, `${rounds.length} round${rounds.length === 1 ? "" : "s"}`)),
       explain("The history of what was sent, round by round. Frozen: it's the record of how the design came to be."),

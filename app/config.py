@@ -44,7 +44,7 @@ def config_dir() -> Path:
 DEFAULTS = {
     "appearance": {
         "mode": "system",            # system | light | dark
-        "preset": "moss",            # starting palette; per-token overrides below win
+        "preset": "forest",          # starting palette; per-token overrides below win
         "overrides": {"light": {}, "dark": {}},
         "font_ui": "system",         # system | inter | serif | rounded | mono | any installed family name
         "font_mono": "system",
@@ -66,14 +66,14 @@ DEFAULTS = {
         "root": str(REPO_ROOT / "projects"),
         "units": "ft",
         "location": {"lat": 40.0, "lon": -83.0, "utc_offset": -5},
-        "default_outputs": ["stills", "plan_check", "orbit_video", "web_walkthrough"],
+        "default_outputs": ["stills", "plan_check", "web_walkthrough"],
         "default_detail": "preview",
     },
     "rendering": {
         "device": "auto",            # auto | gpu | cpu
         "blender_path": "",
     },
-    "window": {"last_node": None, "last_tab": "input", "split": False},
+    "window": {"last_node": None, "last_tab": "input", "split": False, "advanced_outputs": False},
 }
 
 _lock = threading.Lock()

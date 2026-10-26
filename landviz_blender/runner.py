@@ -67,6 +67,8 @@ def use(job, data, result):
             t = time.time()
             out = Path(job["outputs"][name])
             out.parent.mkdir(parents=True, exist_ok=True)
+            res = v.get("resolution") or data["render"]["resolution"]  # photo matches use the photo's aspect
+            bpy.context.scene.render.resolution_x, bpy.context.scene.render.resolution_y = res
             stage.render_still(cam, out)
             result["files"].append(str(out))
             result["timings"][f"render_{name}_s"] = round(time.time() - t, 1)

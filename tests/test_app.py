@@ -138,6 +138,61 @@ class AppTests(unittest.TestCase):
         self.assertIn(str(n.design_path), brief)
         self.assertIn("exactly as written", brief)
 
+    def test_questions_before_building(self):
+        """The agent can stop to ask; answers (or 'use your best judgement') continue the same round."""
+        from app.jobs import Job
+        fake = self.root / "fake_agent.py"
+        fake.write_text(
+            "import json, sys, pathlib\n"
+            "prompt, result = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
+            "if 'answers to your questions' in prompt.read_text():\n"
+            "    result.write_text(json.dumps({'summary': 'built with answers'}))\n"
+            "else:\n"
+            "    (result.parent / 'questions.json').write_text(json.dumps({'questions': [\n"
+            "        {'id': 'q1', 'text': 'Lot width?', 'why': 'scale', 'default': '80 ft'},\n"
+            "        'Keep the shed?']}))\n")
+        base = config.load_settings
+        config.load_settings = lambda: config._merge(base(), {"ai": {
+            "provider": "custom", "custom_command": f"{sys.executable} {fake} {{prompt_file}} {{result_file}}"}})
+        n = store.create_project("P")
+        store.add_input(n, "spec", text="build it")
+        rnd = ai.start_round(n, "design")
+        job = Job("ai_round", n.id, "t", None, "ai")
+        job.lv = lambda *a, **k: None
+        ai.run_round(job, n, rnd)
+        r = n.inputs()["rounds"][-1]
+        self.assertEqual(r["status"], "awaiting_answers")
+        self.assertEqual([q["id"] for q in r["questions"]], ["q1", "q2"])
+        self.assertEqual(r["questions"][0]["default"], "80 ft")
+        with self.assertRaises(ValueError):  # no new round while questions are open
+            store.add_input(n, "spec", text="more")
+            ai.start_round(n, "design")
+
+        ai.answer_round(job, n, r, {"q1": "72 ft", "q2": None})
+        r = n.inputs()["rounds"][-1]
+        self.assertEqual(r["status"], "done")
+        self.assertEqual(r["summary"], "built with answers")
+        self.assertEqual(r["questions"], [])
+        self.assertEqual(len(r["asked_questions"]), 2)
+        answers = next(i for i in n.inputs()["items"] if i.get("answers_to") == r["n"])
+        self.assertEqual(answers["round"], r["n"])  # frozen with this round
+        self.assertIn("72 ft", answers["text"])
+        self.assertIn("best judgement", answers["text"])
+
+    def test_publish_theme_and_empty_site(self):
+        from app import publish
+        css = publish._theme_css({"light": {"bg": "#ffffff", "ink": "#000"}, "dark": {"bg": "#000000", "x;}": "#fff",
+                                  "ink": "red;}body{display:none"}, "mode": "system", "radius": 8})
+        self.assertIn("--bg:#ffffff", css)
+        self.assertIn("prefers-color-scheme: dark", css)
+        self.assertNotIn("display:none", css)   # values are validated, not pasted into the page
+        self.assertNotIn("x;}", css)
+        self.assertNotIn("prefers-color-scheme", publish._theme_css({"light": {"bg": "#fff"}, "mode": "light"}))
+        n = store.create_project("P")
+        self.assertEqual(publish.status(n)["available"], [])
+        with self.assertRaises(RuntimeError):  # nothing made yet → nothing to publish
+            publish.build_site(None, n, {"types": ["stills"]})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
-# Start the 3D Environment Generator app window.
+# Start the 3D Environment Generator app window.   ./launch --help
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-cd "$here" && PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m app "$@"
+py=python3
+[ -x "$here/.venv/bin/python" ] && py="$here/.venv/bin/python"   # optional extras (./launch --setup)
+if [ "$1" = "--setup" ]; then
+  echo "Creating $here/.venv with the optional extras (LiDAR point clouds)…"
+  python3 -m venv --system-site-packages "$here/.venv" && "$here/.venv/bin/python" -m pip install -q -r "$here/requirements-extras.txt" && echo "done."
+  exit $?
+fi
+cd "$here" && PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m app "$@"
