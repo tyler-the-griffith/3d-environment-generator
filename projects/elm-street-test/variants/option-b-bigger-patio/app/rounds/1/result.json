@@ -1,0 +1,13 @@
+{
+  "summary": "Option B overlays the parent design and extends the backyard flagstone patio 10 ft north (far edge moved from y≈95-100 to y≈105-110 ft), growing it from roughly 600 sq ft to roughly 920 sq ft (about +50%). The seat wall, hosta planting and stepping-stone path that sat on the old north edge were shifted 10 ft north with it. Everything else is inherited from the parent.",
+  "notes": [
+    "Validate reports no errors. The only warning, that street-tree-w and street-tree-e fall outside the property boundary, is inherited from the parent; those trees are in the street strip.",
+    "The plan-check overlay matches the house, garage, driveway, walk, beds and fence. The plan drawing still shows the original patio, seat wall and hostas, so the new patio extends past the drawn patio by design, and the shifted seat wall and hostas sit slightly north of their drawn positions.",
+    "I interpreted 'extend 10 ft north' as moving the whole north edge of the patio 10 ft, keeping its angled corner shape, rather than adding a separate rectangle.",
+    "The accent maple and patio bed on the east side were left where they are, and the patio's east edge (x=70) is unchanged."
+  ],
+  "questions": [
+    "Should the seat wall and hostas move north with the larger patio (as done here), or stay at their original locations?"
+  ],
+  "requests": []
+}

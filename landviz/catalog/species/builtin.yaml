@@ -1,0 +1,687 @@
+# Built-in species library. Sizes are typical mature sizes (bare numbers = feet).
+# Colors are approximate rendering colors, not botanical references.
+#
+# Fields:
+#   common, botanical, aliases[]    names used to match plan keys (case/punctuation-insensitive)
+#   category   tree | shrub | grass | perennial | groundcover | vine | annual
+#   form       generator shape — see landviz/catalog/__init__.py KNOWN_FORMS
+#   height, spread, years_to_mature
+#   evergreen, winter (bare | evergreen | dormant | persistent)
+#   foliage    hex, or {spring, summer, fall, winter}; fall_color is shorthand for foliage.fall
+#   flowers    {color, months: [..], density 0-1}
+#   leaf_size  tiny | small | medium | large | needle | blade
+#   generator  free-form overrides passed to the Blender plant generator
+#   asset      path to a .blend/.glb/.obj model to use instead of the generator
+
+# ------------------------------------------------------------------ trees
+acer_rubrum:
+  common: Red Maple
+  botanical: Acer rubrum
+  aliases: [October Glory Maple, Red Sunset Maple]
+  category: tree
+  form: tree_oval
+  height: 45
+  spread: 35
+  years_to_mature: 25
+  foliage: {spring: "#6f8a3a", summer: "#3f6128", fall: "#c1301f"}
+  bark: "#7d7a72"
+
+acer_palmatum:
+  common: Japanese Maple
+  botanical: Acer palmatum
+  aliases: [Bloodgood Japanese Maple]
+  category: tree
+  form: tree_spreading
+  height: 18
+  spread: 18
+  years_to_mature: 20
+  foliage: {spring: "#7a2a2e", summer: "#5a1d24", fall: "#b3202a"}
+  leaf_size: small
+  bark: "#4f3f3a"
+  generator: {trunk_count: 2, canopy_layers: 3}
+
+betula_nigra:
+  common: River Birch
+  botanical: Betula nigra
+  aliases: [Heritage River Birch]
+  category: tree
+  form: tree_multistem
+  height: 45
+  spread: 30
+  years_to_mature: 20
+  foliage: {summer: "#4d6b2c", fall: "#c9a43a"}
+  bark: "#b39a86"
+  leaf_size: small
+  generator: {trunk_count: 3}
+
+amelanchier:
+  common: Serviceberry
+  botanical: Amelanchier x grandiflora
+  aliases: [Autumn Brilliance Serviceberry, Juneberry]
+  category: tree
+  form: tree_multistem
+  height: 20
+  spread: 15
+  years_to_mature: 15
+  foliage: {spring: "#7b8a4a", summer: "#4a6a2e", fall: "#d0562a"}
+  flowers: {color: "#f6f4ee", months: [4], density: 0.8}
+  bark: "#8b8780"
+  leaf_size: small
+  generator: {trunk_count: 4}
+
+cercis_canadensis:
+  common: Eastern Redbud
+  botanical: Cercis canadensis
+  category: tree
+  form: tree_spreading
+  height: 25
+  spread: 30
+  years_to_mature: 15
+  foliage: {summer: "#4e6d2c", fall: "#cfa93c"}
+  flowers: {color: "#c25aa0", months: [4], density: 0.9}
+  leaf_size: large
+  bark: "#4a3c33"
+
+cornus_kousa:
+  common: Kousa Dogwood
+  botanical: Cornus kousa
+  category: tree
+  form: tree_round
+  height: 25
+  spread: 25
+  years_to_mature: 20
+  foliage: {summer: "#3f5e29", fall: "#9a2a24"}
+  flowers: {color: "#f4f1e6", months: [5, 6], density: 0.8}
+  bark: "#8a7a68"
+
+cornus_florida:
+  common: Flowering Dogwood
+  botanical: Cornus florida
+  category: tree
+  form: tree_spreading
+  height: 25
+  spread: 25
+  years_to_mature: 20
+  foliage: {summer: "#41612c", fall: "#9c2b2a"}
+  flowers: {color: "#f6f2ea", months: [4, 5], density: 0.85}
+
+malus:
+  common: Flowering Crabapple
+  botanical: Malus spp.
+  aliases: [Crabapple, Prairifire Crabapple]
+  category: tree
+  form: tree_round
+  height: 18
+  spread: 18
+  years_to_mature: 12
+  foliage: {summer: "#3d5b2b", fall: "#b7862e"}
+  flowers: {color: "#e88aa8", months: [4, 5], density: 0.9}
+  leaf_size: small
+
+gleditsia_triacanthos:
+  common: Thornless Honeylocust
+  botanical: Gleditsia triacanthos var. inermis
+  aliases: [Honeylocust, Skyline Honeylocust]
+  category: tree
+  form: tree_vase
+  height: 50
+  spread: 35
+  years_to_mature: 20
+  foliage: {summer: "#6f8f2f", fall: "#d8b434"}
+  leaf_size: tiny
+  generator: {leaf_density: 0.55}
+
+quercus_bicolor:
+  common: Swamp White Oak
+  botanical: Quercus bicolor
+  category: tree
+  form: tree_round
+  height: 55
+  spread: 55
+  years_to_mature: 40
+  foliage: {summer: "#3a5a2a", fall: "#8a5a2a"}
+  bark: "#6b625a"
+
+prunus_serrulata:
+  common: Kwanzan Cherry
+  botanical: Prunus serrulata 'Kwanzan'
+  aliases: [Flowering Cherry, Japanese Flowering Cherry]
+  category: tree
+  form: tree_vase
+  height: 25
+  spread: 25
+  years_to_mature: 15
+  foliage: {summer: "#3e5d2a", fall: "#c06a2a"}
+  flowers: {color: "#f0a6c4", months: [4], density: 1.0}
+  bark: "#5a3a34"
+
+picea_abies:
+  common: Norway Spruce
+  botanical: Picea abies
+  category: tree
+  form: conifer_conical
+  height: 50
+  spread: 25
+  years_to_mature: 30
+  evergreen: true
+  foliage: "#25402a"
+  leaf_size: needle
+
+picea_pungens:
+  common: Colorado Blue Spruce
+  botanical: Picea pungens
+  category: tree
+  form: conifer_conical
+  height: 40
+  spread: 18
+  years_to_mature: 30
+  evergreen: true
+  foliage: "#5f7d84"
+  leaf_size: needle
+
+thuja_green_giant:
+  common: Green Giant Arborvitae
+  botanical: Thuja 'Green Giant'
+  category: tree
+  form: conifer_conical
+  height: 40
+  spread: 14
+  years_to_mature: 12
+  evergreen: true
+  foliage: "#2f5428"
+  leaf_size: needle
+
+thuja_emerald:
+  common: Emerald Green Arborvitae
+  botanical: Thuja occidentalis 'Smaragd'
+  aliases: [Emerald Arborvitae, Smaragd Arborvitae]
+  category: shrub
+  form: conifer_columnar
+  height: 14
+  spread: 4
+  years_to_mature: 10
+  evergreen: true
+  foliage: "#365e2c"
+  leaf_size: needle
+
+juniperus_virginiana:
+  common: Eastern Red Cedar
+  botanical: Juniperus virginiana
+  category: tree
+  form: conifer_columnar
+  height: 35
+  spread: 12
+  years_to_mature: 25
+  evergreen: true
+  foliage: "#3c5434"
+  leaf_size: needle
+
+# ------------------------------------------------------------------ shrubs
+buxus:
+  common: Boxwood
+  botanical: Buxus spp.
+  aliases: [Green Velvet Boxwood, Green Mountain Boxwood, Winter Gem Boxwood]
+  category: shrub
+  form: shrub_round
+  height: 3
+  spread: 3
+  years_to_mature: 8
+  evergreen: true
+  foliage: "#3a5a26"
+  leaf_size: tiny
+  generator: {sheared: true}
+
+hydrangea_paniculata:
+  common: Panicle Hydrangea
+  botanical: Hydrangea paniculata
+  aliases: [Limelight Hydrangea, Little Lime Hydrangea, Bobo Hydrangea]
+  category: shrub
+  form: shrub_round
+  height: 6
+  spread: 6
+  years_to_mature: 4
+  foliage: {summer: "#4d6b2e", fall: "#7a6a3a"}
+  flowers: {color: "#e9f0cf", months: [7, 8, 9], density: 0.9}
+  leaf_size: large
+
+hydrangea_macrophylla:
+  common: Bigleaf Hydrangea
+  botanical: Hydrangea macrophylla
+  aliases: [Endless Summer Hydrangea]
+  category: shrub
+  form: shrub_mound
+  height: 4
+  spread: 4
+  years_to_mature: 4
+  foliage: "#43652b"
+  flowers: {color: "#7f8fd6", months: [6, 7, 8], density: 0.85}
+  leaf_size: large
+
+hydrangea_arborescens:
+  common: Smooth Hydrangea
+  botanical: Hydrangea arborescens
+  aliases: [Annabelle Hydrangea, Incrediball Hydrangea]
+  category: shrub
+  form: shrub_mound
+  height: 4
+  spread: 4
+  years_to_mature: 3
+  foliage: "#4a6a2c"
+  flowers: {color: "#f2f4e6", months: [6, 7], density: 0.9}
+  leaf_size: large
+
+spiraea_japonica:
+  common: Japanese Spirea
+  botanical: Spiraea japonica
+  aliases: [Spirea, Goldflame Spirea, Little Princess Spirea]
+  category: shrub
+  form: shrub_mound
+  height: 3
+  spread: 4
+  years_to_mature: 3
+  foliage: {spring: "#9aa23a", summer: "#5d7a30", fall: "#b0602a"}
+  flowers: {color: "#e58fb5", months: [6, 7], density: 0.6}
+  leaf_size: small
+
+physocarpus:
+  common: Ninebark
+  botanical: Physocarpus opulifolius
+  aliases: [Diabolo Ninebark, Summer Wine Ninebark]
+  category: shrub
+  form: shrub_upright
+  height: 7
+  spread: 6
+  years_to_mature: 4
+  foliage: {summer: "#4a2730", fall: "#6a2a2a"}
+  flowers: {color: "#f2dfe0", months: [6], density: 0.4}
+
+ilex_glabra:
+  common: Inkberry Holly
+  botanical: Ilex glabra
+  aliases: [Inkberry, Shamrock Inkberry]
+  category: shrub
+  form: shrub_round
+  height: 5
+  spread: 5
+  years_to_mature: 6
+  evergreen: true
+  foliage: "#2f4f26"
+  leaf_size: small
+
+taxus_media:
+  common: Yew
+  botanical: Taxus x media
+  aliases: [Hicks Yew, Densiformis Yew]
+  category: shrub
+  form: shrub_spreading
+  height: 4
+  spread: 6
+  years_to_mature: 10
+  evergreen: true
+  foliage: "#22401f"
+  leaf_size: needle
+
+rosa_knockout:
+  common: Knock Out Rose
+  botanical: Rosa 'Radrazz'
+  aliases: [Knockout Rose, Shrub Rose]
+  category: shrub
+  form: shrub_round
+  height: 4
+  spread: 4
+  years_to_mature: 3
+  foliage: "#3d5e2a"
+  flowers: {color: "#d12a52", months: [6, 7, 8, 9, 10], density: 0.6}
+
+fothergilla:
+  common: Dwarf Fothergilla
+  botanical: Fothergilla gardenii
+  category: shrub
+  form: shrub_mound
+  height: 3
+  spread: 4
+  years_to_mature: 5
+  foliage: {summer: "#4b6a33", fall: "#d0542a"}
+  flowers: {color: "#f4f0e2", months: [4, 5], density: 0.6}
+
+syringa:
+  common: Lilac
+  botanical: Syringa vulgaris
+  aliases: [Common Lilac, Miss Kim Lilac]
+  category: shrub
+  form: shrub_upright
+  height: 10
+  spread: 8
+  years_to_mature: 6
+  foliage: "#3f5d2c"
+  flowers: {color: "#a98ad0", months: [5], density: 0.8}
+  leaf_size: large
+
+juniperus_horizontalis:
+  common: Creeping Juniper
+  botanical: Juniperus horizontalis
+  aliases: [Blue Rug Juniper, Spreading Juniper]
+  category: groundcover
+  form: groundcover
+  height: 0.5
+  spread: 6
+  years_to_mature: 5
+  evergreen: true
+  foliage: "#4f6e6a"
+  leaf_size: needle
+
+rhododendron:
+  common: Rhododendron
+  botanical: Rhododendron catawbiense
+  category: shrub
+  form: shrub_round
+  height: 6
+  spread: 6
+  years_to_mature: 8
+  evergreen: true
+  foliage: "#2c4a24"
+  flowers: {color: "#b4559e", months: [5], density: 0.8}
+  leaf_size: large
+
+azalea:
+  common: Azalea
+  botanical: Rhododendron (Azalea group)
+  aliases: [Encore Azalea]
+  category: shrub
+  form: shrub_mound
+  height: 3
+  spread: 4
+  years_to_mature: 5
+  evergreen: true
+  foliage: "#344f26"
+  flowers: {color: "#e2507a", months: [4, 5], density: 0.95}
+  leaf_size: small
+
+# ------------------------------------------------------------------ grasses
+calamagrostis:
+  common: Feather Reed Grass
+  botanical: Calamagrostis x acutiflora 'Karl Foerster'
+  aliases: [Karl Foerster Grass, Karl Foerster Feather Reed Grass]
+  category: grass
+  form: grass_clump
+  height: 5
+  spread: 2
+  years_to_mature: 3
+  foliage: {summer: "#6a8040", fall: "#c8a868"}
+  flowers: {color: "#c9b27d", months: [7, 8, 9, 10], density: 0.6}
+  winter: persistent
+  leaf_size: blade
+
+schizachyrium:
+  common: Little Bluestem
+  botanical: Schizachyrium scoparium
+  category: grass
+  form: grass_clump
+  height: 3
+  spread: 1.5
+  years_to_mature: 3
+  foliage: {summer: "#6f8a7c", fall: "#b06a3c"}
+  winter: persistent
+  leaf_size: blade
+
+pennisetum:
+  common: Fountain Grass
+  botanical: Pennisetum alopecuroides
+  aliases: [Hameln Fountain Grass]
+  category: grass
+  form: grass_fountain
+  height: 3
+  spread: 3
+  years_to_mature: 3
+  foliage: {summer: "#5d7a38", fall: "#c2a050"}
+  flowers: {color: "#d8cbb0", months: [8, 9, 10], density: 0.6}
+  winter: persistent
+  leaf_size: blade
+
+hakonechloa:
+  common: Japanese Forest Grass
+  botanical: Hakonechloa macra
+  aliases: [Hakone Grass, Aureola]
+  category: grass
+  form: grass_fountain
+  height: 1.5
+  spread: 2
+  years_to_mature: 4
+  foliage: "#b4b83a"
+  winter: dormant
+  leaf_size: blade
+
+panicum:
+  common: Switchgrass
+  botanical: Panicum virgatum
+  aliases: [Northwind Switchgrass, Shenandoah Switchgrass]
+  category: grass
+  form: grass_clump
+  height: 5
+  spread: 2.5
+  years_to_mature: 3
+  foliage: {summer: "#5e7a4a", fall: "#c09a4a"}
+  winter: persistent
+  leaf_size: blade
+
+liriope:
+  common: Lilyturf
+  botanical: Liriope muscari
+  aliases: [Liriope, Big Blue Liriope]
+  category: groundcover
+  form: grass_fountain
+  height: 1.2
+  spread: 1.5
+  years_to_mature: 3
+  evergreen: true
+  foliage: "#2f5226"
+  flowers: {color: "#7a5ab4", months: [8, 9], density: 0.5}
+  leaf_size: blade
+
+# ------------------------------------------------------------------ perennials
+hosta:
+  common: Hosta
+  botanical: Hosta spp.
+  category: perennial
+  form: perennial_mound
+  height: 1.5
+  spread: 2.5
+  years_to_mature: 3
+  foliage: "#4f7a3a"
+  flowers: {color: "#c6b8e0", months: [7], density: 0.3}
+  leaf_size: large
+
+hemerocallis:
+  common: Daylily
+  botanical: Hemerocallis spp.
+  aliases: [Stella de Oro Daylily, Daylilies]
+  category: perennial
+  form: grass_fountain
+  height: 1.5
+  spread: 2
+  years_to_mature: 2
+  foliage: "#4e7a32"
+  flowers: {color: "#f2b31e", months: [6, 7, 8], density: 0.6}
+  leaf_size: blade
+
+echinacea:
+  common: Purple Coneflower
+  botanical: Echinacea purpurea
+  aliases: [Coneflower]
+  category: perennial
+  form: perennial_spike
+  height: 3
+  spread: 2
+  years_to_mature: 2
+  foliage: "#45662e"
+  flowers: {color: "#c4589a", months: [6, 7, 8], density: 0.7}
+
+rudbeckia:
+  common: Black-eyed Susan
+  botanical: Rudbeckia fulgida
+  aliases: [Goldsturm Rudbeckia, Black Eyed Susan]
+  category: perennial
+  form: perennial_mound
+  height: 2.5
+  spread: 2
+  years_to_mature: 2
+  foliage: "#3f5f2a"
+  flowers: {color: "#f0b419", months: [7, 8, 9], density: 0.9}
+
+nepeta:
+  common: Catmint
+  botanical: Nepeta x faassenii
+  aliases: [Walker's Low Catmint, Nepeta]
+  category: perennial
+  form: perennial_mound
+  height: 2
+  spread: 3
+  years_to_mature: 2
+  foliage: "#7d917a"
+  flowers: {color: "#8a7ad0", months: [5, 6, 7, 8, 9], density: 0.8}
+  leaf_size: tiny
+
+salvia_nemorosa:
+  common: Salvia
+  botanical: Salvia nemorosa
+  aliases: [May Night Salvia, Meadow Sage]
+  category: perennial
+  form: perennial_spike
+  height: 1.5
+  spread: 1.5
+  years_to_mature: 2
+  foliage: "#4a6a35"
+  flowers: {color: "#5a3aa0", months: [5, 6, 7, 8], density: 0.9}
+  leaf_size: small
+
+lavandula:
+  common: Lavender
+  botanical: Lavandula x intermedia
+  aliases: [Phenomenal Lavender, English Lavender]
+  category: perennial
+  form: perennial_spike
+  height: 2
+  spread: 2
+  years_to_mature: 2
+  evergreen: true
+  foliage: "#8a9a86"
+  flowers: {color: "#8e7ac8", months: [6, 7, 8], density: 0.9}
+  leaf_size: tiny
+
+sedum:
+  common: Autumn Joy Sedum
+  botanical: Hylotelephium 'Herbstfreude'
+  aliases: [Sedum, Stonecrop, Autumn Joy Stonecrop]
+  category: perennial
+  form: perennial_mound
+  height: 2
+  spread: 2
+  years_to_mature: 2
+  foliage: "#7a9a6a"
+  flowers: {color: "#b04a5a", months: [8, 9, 10], density: 0.8}
+
+heuchera:
+  common: Coral Bells
+  botanical: Heuchera spp.
+  aliases: [Heuchera]
+  category: perennial
+  form: perennial_mound
+  height: 1
+  spread: 1.5
+  years_to_mature: 2
+  evergreen: true
+  foliage: "#5a2a3a"
+  flowers: {color: "#e6c8d0", months: [6], density: 0.3}
+  leaf_size: medium
+
+astilbe:
+  common: Astilbe
+  botanical: Astilbe spp.
+  category: perennial
+  form: perennial_spike
+  height: 2
+  spread: 1.5
+  years_to_mature: 2
+  foliage: "#3a5a2a"
+  flowers: {color: "#e07a9a", months: [6, 7], density: 0.8}
+  leaf_size: small
+
+coreopsis:
+  common: Coreopsis
+  botanical: Coreopsis verticillata
+  aliases: [Threadleaf Coreopsis, Moonbeam Coreopsis, Tickseed]
+  category: perennial
+  form: perennial_mound
+  height: 1.5
+  spread: 1.5
+  years_to_mature: 2
+  foliage: "#4f6f32"
+  flowers: {color: "#f2e06a", months: [6, 7, 8, 9], density: 0.9}
+  leaf_size: tiny
+
+perovskia:
+  common: Russian Sage
+  botanical: Perovskia atriplicifolia
+  aliases: [Salvia yangii]
+  category: perennial
+  form: perennial_spike
+  height: 4
+  spread: 3
+  years_to_mature: 2
+  foliage: "#9aa59a"
+  flowers: {color: "#8c8ad8", months: [7, 8, 9], density: 0.8}
+  leaf_size: tiny
+
+paeonia:
+  common: Peony
+  botanical: Paeonia lactiflora
+  category: perennial
+  form: perennial_mound
+  height: 3
+  spread: 3
+  years_to_mature: 3
+  foliage: "#3e5f2c"
+  flowers: {color: "#f2a2b8", months: [5, 6], density: 0.6}
+  leaf_size: medium
+
+# ------------------------------------------------------------------ groundcovers
+pachysandra:
+  common: Pachysandra
+  botanical: Pachysandra terminalis
+  aliases: [Japanese Spurge]
+  category: groundcover
+  form: groundcover
+  height: 0.6
+  spread: 1
+  years_to_mature: 3
+  evergreen: true
+  foliage: "#2f5a28"
+  leaf_size: small
+
+phlox_subulata:
+  common: Creeping Phlox
+  botanical: Phlox subulata
+  aliases: [Moss Phlox]
+  category: groundcover
+  form: groundcover
+  height: 0.4
+  spread: 2
+  years_to_mature: 2
+  evergreen: true
+  foliage: "#4a6a32"
+  flowers: {color: "#d58ad6", months: [4, 5], density: 1.0}
+  leaf_size: tiny
+
+vinca_minor:
+  common: Periwinkle
+  botanical: Vinca minor
+  aliases: [Vinca, Myrtle]
+  category: groundcover
+  form: groundcover
+  height: 0.4
+  spread: 2
+  years_to_mature: 3
+  evergreen: true
+  foliage: "#2c4a24"
+  flowers: {color: "#6a6ad0", months: [4, 5], density: 0.4}
+  leaf_size: small

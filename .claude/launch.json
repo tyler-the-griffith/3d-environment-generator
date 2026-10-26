@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "app",
+      "runtimeExecutable": "./launch",
+      "runtimeArgs": ["--no-window", "--port", "8791"],
+      "port": 8791
+    },
+    {
+      "name": "demo-gallery",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8790", "--directory", "projects/demo/renders"],
+      "port": 8790
+    }
+  ]
+}

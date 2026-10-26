@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landscape Walkthrough</title>
+<style>
+  :root { --bg: #dfe8ee; --panel: rgba(255,255,255,.88); --ink: #1d2a22; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1b2126; --panel: rgba(30,36,40,.88); --ink: #e6ece8; } }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 12px; top: 12px; background: var(--panel); padding: 10px 12px; border-radius: 8px; max-width: 320px; }
+  #hud b { display: block; margin-bottom: 4px; }
+  #hud button { margin: 6px 6px 0 0; padding: 4px 10px; border-radius: 6px; border: 1px solid #8888; background: transparent; color: inherit; cursor: pointer; }
+  #status { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: 16px; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <b id="title">Landscape walkthrough</b>
+  <span id="help">Drag to orbit · scroll to zoom · right-drag to pan</span><br>
+  <button id="mode">Walk mode</button><button id="reset">Reset view</button>
+</div>
+<div id="status">Loading model…</div>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+
+const params = new URLSearchParams(location.search);
+const modelUrl = params.get("model") || "model.glb";
+// Sidecar written by `lv export`: the same sun position the still renders use.
+const info = await fetch(modelUrl.replace(/\.glb$/, ".json")).then(r => r.ok ? r.json() : null).catch(() => null);
+const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// Sun direction in viewer space. Site frame is X east, Y north, Z up; glTF/three is
+// X east, Y up, Z south. Azimuth is clockwise from site north.
+const az = THREE.MathUtils.degToRad(info?.sun?.azimuth_site_deg ?? 225);
+const el = THREE.MathUtils.degToRad(info?.sun?.elevation_deg ?? 45);
+const sunDir = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el));
+const day = Math.max(0, Math.min(1, (info?.sun?.elevation_deg ?? 45) / 12));  // 0 at/below horizon
+const sky = new THREE.Color(0x1c2638).lerp(new THREE.Color(0xbcd3e6), day);
+scene.background = sky;
+scene.fog = new THREE.Fog(sky, 150, 900);
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 3000);
+scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a6a3a, 0.35 + 0.85 * day));
+const sun = new THREE.DirectionalLight(new THREE.Color(0xffc890).lerp(new THREE.Color(0xfff2dd), day), 2.6 * day);
+if (info?.name) { document.title = info.name; document.getElementById("title").textContent = info.name; }
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.bias = -0.0004;
+sun.shadow.normalBias = 0.06;
+Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, far: 400 });
+scene.add(sun);
+
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.maxPolarAngle = Math.PI * 0.49;
+const walk = new PointerLockControls(camera, document.body);
+let walking = false, home = null;
+const keys = {};
+addEventListener("keydown", e => keys[e.code] = true);
+addEventListener("keyup", e => keys[e.code] = false);
+const ray = new THREE.Raycaster();
+let model;
+
+new GLTFLoader().load(modelUrl, gltf => {
+  model = gltf.scene;
+  // Blender is Z-up; the glTF exporter already converts to Y-up.
+  model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true;
+    if (o.material) o.material.side = THREE.DoubleSide; } });
+  scene.add(model);
+  const box = new THREE.Box3().setFromObject(model);
+  // Frame the buildings (the terrain margin would push the camera miles out).
+  const core = new THREE.Box3();
+  model.traverse(o => { if (o.isMesh && /_(walls|roof)/.test(o.name)) core.expandByObject(o); });
+  const fb = core.isEmpty() ? box : core;
+  const c2 = fb.getCenter(new THREE.Vector3());
+  const size = Math.max(25, Math.min(fb.getSize(new THREE.Vector3()).length(), 160));
+  home = { pos: c2.clone().add(new THREE.Vector3(0, size * 0.9, size * 1.4)), target: c2 };
+  sun.target.position.copy(c2); sun.position.copy(c2).addScaledVector(sunDir, 150); scene.add(sun.target);
+  resetView();
+  document.getElementById("status").remove();
+}, xhr => {
+  if (xhr.total) document.getElementById("status").textContent = `Loading model… ${Math.round(100 * xhr.loaded / xhr.total)}%`;
+}, err => { document.getElementById("status").textContent = "Couldn't load " + modelUrl + ": " + err.message; });
+
+function resetView() {
+  if (!home) return;
+  camera.position.copy(home.pos); orbit.target.copy(home.target); orbit.update();
+}
+document.getElementById("reset").onclick = () => { if (walking) toggle(); resetView(); };
+document.getElementById("mode").onclick = toggle;
+function toggle() {
+  walking = !walking;
+  document.getElementById("mode").textContent = walking ? "Orbit mode" : "Walk mode";
+  document.getElementById("help").textContent = walking
+    ? "Click to look around · WASD to walk · Shift to run · Esc to release mouse"
+    : "Drag to orbit · scroll to zoom · right-drag to pan";
+  orbit.enabled = !walking;
+  if (walking) { camera.position.y = groundY(camera.position) + 1.65; walk.lock(); }
+}
+document.body.addEventListener("click", () => { if (walking && !walk.isLocked) walk.lock(); });
+
+function groundY(p) {
+  if (!model) return 0;
+  ray.set(new THREE.Vector3(p.x, 500, p.z), new THREE.Vector3(0, -1, 0));
+  const hit = ray.intersectObject(model, true)[0];
+  return hit ? hit.point.y : 0;
+}
+
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (walking) {
+    const speed = (keys.ShiftLeft || keys.ShiftRight ? 6 : 2.2) * dt;
+    if (keys.KeyW) walk.moveForward(speed);
+    if (keys.KeyS) walk.moveForward(-speed);
+    if (keys.KeyA) walk.moveRight(-speed);
+    if (keys.KeyD) walk.moveRight(speed);
+    camera.position.y += (groundY(camera.position) + 1.65 - camera.position.y) * 0.2;
+  }
+  renderer.render(scene, camera);
+});
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

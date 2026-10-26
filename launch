@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Start the 3D Environment Generator app window.
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+cd "$here" && PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m app "$@"

@@ -1,0 +1,56 @@
+# landviz project spec — the single source of truth for one property.
+# Full reference: docs/SPEC.md.  Coordinates: X = east, Y = north, origin anywhere convenient
+# (a property corner is easiest). Bare numbers are in `project.units`; any value may carry its
+# own unit ("18 in", "2 m", "6' 6\"").
+
+project:
+  name: TEMPLATE_NAME
+  units: ft
+
+site:
+  location: {lat: 40.0, lon: -83.0, utc_offset: -5, north_offset_deg: 0}
+  boundary: [[0, 0], [100, 0], [100, 140], [0, 140]]   # property line
+  terrain:
+    type: flat            # flat | graded (points: [[x, y, elevation], ...]) | scan
+    margin: 80            # modeled ground beyond the boundary
+    # type: graded
+    # points: [[0, 0, 0], [100, 0, 0], [0, 140, 3], [100, 140, 2.5], [50, 60, 1.2]]
+
+# The landscaper's drawing, for the 2D overlay and for authoring coordinates in plan pixels.
+plan:
+  image: plan/plan-1.png
+  # calibration (pick one):
+  #   points: two+ pixels with known site coordinates (e.g. property corners)
+  #     - {px: [212, 1840], at: [0, 0]}
+  #     - {px: [1630, 1838], at: [100, 0]}
+  #   drawing_scale: "1in = 10ft"   + dpi: 150 (as imported) + origin_px: [x, y] + origin_at: [0, 0]
+
+defaults:
+  frame: site             # 'plan' = element coordinates are plan-image pixels
+
+elements:
+  # - {id: house, kind: structure, footprint: [[25,45],[75,45],[75,75],[25,75]], wall_height: 18,
+  #    roof: {type: hip, pitch: 6/12}}
+  # - {id: front-lawn, kind: lawn, polygon: [[0,0],[100,0],[100,40],[0,40]]}
+  # - {id: bed-1, kind: bed, polygon: [...], surface: mulch_dark, edging: steel}
+  # - {id: maple, kind: plant, species: acer_rubrum, at: [20, 30]}
+  # - {id: hedge, kind: plant_row, species: buxus, line: [[30,44],[60,44]], spacing: 3}
+  # - {id: mass-1, kind: plant_group, species: nepeta, polygon: [...], spacing: 24in}
+
+views:
+  - {name: aerial, preset: aerial, azimuth: 200, elevation: 35}
+  - {name: plan, preset: top}
+  # - {name: front, preset: eye, position: [50, -15], target: [50, 50]}
+  # - {name: orbit, preset: orbit, seconds: 20}
+
+render:
+  quality: preview        # draft | preview | final | web
+  resolution: [1920, 1080]
+  year: 5                 # years after planting, or 'mature'
+  season: summer          # or date: 2026-10-15
+  time: "16:30"
+
+# variants:
+#   year1: {render: {year: 1}}
+#   fall:  {render: {season: fall}}
+#   option-b: {exclude_tags: [option-a]}

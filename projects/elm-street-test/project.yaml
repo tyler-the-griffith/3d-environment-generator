@@ -1,0 +1,208 @@
+# Design file — the deterministic source of truth for every output of this project.
+# It is written by the AI from your inputs, can be edited here, and picks up hand edits
+# pulled from Blender (edits.yaml). Reference: docs/SPEC.md
+project:
+  name: Elm Street Test
+  units: ft
+site:
+  location: {lat: 39.96, lon: -83.0, utc_offset: -4}   # Columbus, OH (summer time); plan north is up
+  boundary: [[0, 0], [100, 0], [100, 140], [0, 140]]   # 100 ft wide (street/south) x 140 ft deep, per notes
+  terrain: {type: flat}   # the plan shows no grading
+
+# Calibrated on the two property-line corners of the plan: NW (602, 66) and SE (1273, 1005).
+plan:
+  image: app/files/d15bc71b47/landscape-plan.png
+  calibration:
+    points:
+      - {px: [602, 66], at: [0, 140]}
+      - {px: [1273, 1005], at: [100, 0]}
+
+elements:
+  # ------------------------------------------------------------ house
+  - id: house
+    kind: structure
+    footprint: [[25, 45], [75, 45], [75, 77], [25, 77]]
+    wall_height: 19            # two stories
+    floor_raise: 1.5
+    roof: {type: hip, pitch: 7/12, overhang: 1.5}
+    colors: {walls: "#cfc8b8", roof: "#3b3a3a", trim: "#f4f2ec", door: "#2d3a4a"}
+    windows:
+      - {edge: 0, at: 0.2, count: 2, spacing: 5, width: 3, height: 5}
+      - {edge: 0, at: 0.8, count: 2, spacing: 5, width: 3, height: 5}
+      - {edge: 0, at: 0.2, count: 2, spacing: 5, width: 3, height: 4, sill: 12.5}
+      - {edge: 0, at: 0.8, count: 2, spacing: 5, width: 3, height: 4, sill: 12.5}
+      - {edge: 0, at: 0.5, width: 3, height: 4, sill: 12.5}
+      - {edge: 2, at: 0.5, count: 2, spacing: 30, width: 3.5, height: 5}
+      - {edge: 2, at: 0.5, count: 4, spacing: 9, width: 3, height: 4, sill: 12.5}
+      - {edge: 1, at: 0.5, count: 2, spacing: 10, width: 3, height: 5}
+      - {edge: 3, at: 0.5, count: 2, spacing: 10, width: 3, height: 5}
+    doors:
+      - {edge: 0, at: 0.5, width: 3.5, height: 7}
+      - {edge: 2, at: 0.62, width: 6, height: 7}
+  - id: garage
+    kind: structure
+    footprint: [[75, 45], [97, 45], [97, 72], [75, 72]]
+    wall_height: 10
+    floor_raise: 0.3
+    roof: {type: gable, pitch: 7/12, overhang: 1.2, ridge: y}
+    colors: {walls: "#cfc8b8", roof: "#3b3a3a", trim: "#f4f2ec", door: "#c9c4b8"}
+    garage_doors:
+      - {edge: 0, at: 0.5, width: 16, height: 7.5}
+
+  # ------------------------------------------------------------ hardscape
+  - id: driveway
+    kind: paving
+    material: concrete
+    polygon: [[77, -6], [96, -6], [96, 45], [77, 45]]
+  - id: front-walk
+    kind: path
+    material: pavers_gray
+    width: 4
+    smooth: 3
+    line: [[77, 20], [62, 22], [52, 32], [50, 44.5]]
+  - id: stoop
+    kind: paving
+    material: bluestone
+    raise: 1.2
+    thickness: 1.4
+    polygon: [[45, 41], [55, 41], [55, 45], [45, 45]]
+  - id: public-walk
+    kind: paving
+    material: concrete
+    polygon: [[-80, -12], [180, -12], [180, -7], [-80, -7]]
+  - id: patio
+    kind: paving
+    material: flagstone
+    polygon: [[38, 77], [70, 77], [70, 95], [58, 100], [38, 98]]
+  - id: seat-wall
+    kind: wall
+    material: stone
+    height: 1.6
+    thickness: 1.2
+    line: [[36, 92], [36, 101], [48, 104]]
+  - id: stepping
+    kind: path
+    style: stepping_stones
+    width: 1.8
+    gap: 0.6
+    line: [[58, 101], [62, 110], [70, 118], [76, 124]]
+
+  - id: privacy-fence
+    kind: fence
+    style: privacy
+    height: 6
+    note: west side from house back-corner line, across the rear, east side from the garage back corner
+    line: [[0, 77], [0, 140], [100, 140], [100, 72]]
+
+  # ------------------------------------------------------------ lawn + beds
+  - id: front-lawn
+    kind: lawn
+    polygon: [[0, -6], [77, -6], [77, 45], [0, 45]]
+  - id: back-lawn
+    kind: lawn
+    polygon: [[0, 45], [25, 45], [25, 77], [75, 77], [75, 72], [97, 72], [97, 45], [100, 45], [100, 140], [0, 140]]
+  - id: foundation-bed
+    kind: bed
+    surface: mulch_dark
+    edging: steel
+    smooth: 2
+    polygon: [[23, 45], [44, 45], [44, 39], [36, 37.5], [26, 38.5], [21, 41]]
+  - id: foundation-bed-east
+    kind: bed
+    surface: mulch_dark
+    edging: steel
+    smooth: 2
+    polygon: [[56, 45], [75, 45], [76.5, 41], [72, 38.5], [62, 38], [56, 40]]
+  - id: tree-bed
+    kind: bed
+    surface: mulch_dark
+    edging: spade
+    smooth: 3
+    polygon: [[10, 14], [26, 12], [32, 20], [26, 28], [12, 27], [7, 20]]
+  - id: back-border
+    kind: bed
+    surface: mulch
+    edging: stone
+    smooth: 2
+    polygon: [[2, 128], [98, 128], [98, 138], [2, 138]]
+  - id: patio-bed
+    kind: bed
+    surface: mulch_dark
+    edging: steel
+    smooth: 2
+    polygon: [[70, 79], [80, 79], [84, 90], [76, 100], [70, 96]]
+  - id: accent-boulders
+    kind: boulder
+    size: 2.5
+    count: 3
+    polygon: [[14, 16], [26, 15], [28, 24], [14, 24]]
+
+  # ------------------------------------------------------------ planting
+  - {id: shade-tree, kind: plant, species: acer_rubrum, at: [19, 21]}
+  - {id: street-tree-w, kind: plant, species: gleditsia_triacanthos, at: [20, -3]}
+  - {id: street-tree-e, kind: plant, species: gleditsia_triacanthos, at: [60, -3]}
+  - {id: accent-maple, kind: plant, species: acer_palmatum, at: [70, 89]}
+  - {id: backyard-tree, kind: plant, species: cercis_canadensis, at: [20, 110]}
+  - {id: corner-tree, kind: plant, species: amelanchier, at: [27, 41]}
+  - id: boxwood-front
+    kind: plant_row
+    species: buxus
+    sheared: true
+    line: [[29, 40], [41, 41.5]]
+    count: 4
+  - id: boxwood-front-east
+    kind: plant_row
+    species: buxus
+    sheared: true
+    line: [[59, 41.5], [71, 40]]
+    count: 4
+  - {id: hydrangea-w, kind: plant, species: hydrangea_paniculata, at: [33, 43.4]}
+  - {id: hydrangea-e, kind: plant, species: hydrangea_paniculata, at: [66, 43.4]}
+  - {id: hydrangea-e2, kind: plant, species: hydrangea_paniculata, at: [73, 43]}
+  - id: catmint-front
+    kind: plant_group
+    species: nepeta
+    polygon: [[10, 17], [16, 14], [14, 26], [9, 22]]
+    spacing: 24in
+  - id: grasses-front
+    kind: plant_group
+    species: calamagrostis
+    polygon: [[24, 14], [30, 19], [26, 26], [22, 22]]
+    spacing: 24in
+  - id: screen
+    kind: plant_row
+    species: thuja_green_giant
+    line: [[6, 133], [94, 133]]
+    spacing: 8
+  - id: border-perennials
+    kind: plant_group
+    species: echinacea
+    polygon: [[30, 129], [60, 129], [60, 131], [30, 131]]
+    spacing: 20in
+  - id: border-salvia
+    kind: plant_group
+    species: salvia_nemorosa
+    polygon: [[62, 129], [90, 129], [90, 131], [62, 131]]
+    spacing: 18in
+  - id: patio-grasses
+    kind: plant_group
+    species: pennisetum
+    polygon: [[72, 81], [79, 81], [81, 89], [74, 95]]
+    spacing: 30in
+  - id: patio-hostas
+    kind: plant_group
+    species: hosta
+    polygon: [[38, 101], [47, 103.5], [44, 106], [36, 104]]
+    count: 3
+
+views:
+  - {name: street, preset: eye, position: [40, -28], target: [52, 50], lens: 24}
+  - {name: front-walk, preset: eye, position: [70, 10], target: [50, 45], lens: 24}
+  - {name: backyard, preset: eye, position: [90, 118], target: [45, 88], lens: 22}
+  - {name: aerial, preset: aerial, azimuth: 205, elevation: 32, zoom: 0.95}
+  - {name: plan, preset: top, padding: 1.05}
+  - {name: orbit, preset: orbit, seconds: 16, radius: 150, height: 70}
+  - name: walk
+    preset: flythrough
+    seconds: 20
+    path: [[60, -20], [70, 15], [58, 28], [20, 38], [12, 60], [14, 95], [40, 112], [80, 112]]

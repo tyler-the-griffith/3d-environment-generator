@@ -1,0 +1,14 @@
+# Design file — the deterministic source of truth for every output of this project.
+# It is written by the AI from your inputs, can be edited here, and picks up hand edits
+# pulled from Blender (edits.yaml). Reference: docs/SPEC.md
+project:
+  name: Elm Street Test
+  units: ft
+site:
+  location: {lat: 40.0, lon: -83.0, utc_offset: -5}
+  boundary: [[0, 0], [100, 0], [100, 100], [0, 100]]   # placeholder until the AI reads your plan
+  terrain: {type: flat}
+elements: []
+views:
+  - {name: aerial, preset: aerial}
+  - {name: plan, preset: top}

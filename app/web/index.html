@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{APP_NAME}}</title>
+<link rel="icon" href="/branding/app-icon.png">
+<link rel="stylesheet" href="/web/css/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <aside id="nav" class="nav" aria-label="Projects"></aside>
+  <div class="nav-resizer" id="nav-resizer" title="Drag to resize"></div>
+  <main class="main">
+    <header class="topbar" id="topbar"></header>
+    <div class="panes" id="panes">
+      <section class="pane" id="pane-input" aria-label="Input page"></section>
+      <section class="pane" id="pane-output" aria-label="Output page"></section>
+    </div>
+  </main>
+</div>
+<div id="drawer" class="drawer" hidden></div>
+<div id="overlay-root"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script type="module" src="/web/js/main.js"></script>
+</body>
+</html>

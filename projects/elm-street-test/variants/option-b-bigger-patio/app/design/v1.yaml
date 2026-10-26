@@ -1,0 +1,15 @@
+# Child variant of 'Elm Street Test'. Overlay on the parent design: only differences go here.
+parent: base
+title: Option B - bigger patio
+
+# Patio extended 10 ft north (parent far edge moved from y~95-100 to y~105-110).
+# Features that sat on the old north edge move 10 ft north with it.
+elements_override:
+  patio:
+    polygon: [[38, 77], [70, 77], [70, 105], [58, 110], [38, 108]]
+  seat-wall:
+    line: [[36, 102], [36, 111], [48, 114]]
+  stepping:
+    line: [[58, 111], [62, 116], [70, 121], [76, 126]]
+  patio-hostas:
+    polygon: [[38, 111], [47, 113.5], [44, 116], [36, 114]]

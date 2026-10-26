@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+# Regenerable per-project outputs
+projects/*/derived/
+projects/*/renders/
+# Raw client inputs can be large/private; commit deliberately if wanted
+projects/*/refs/
+*.blend1
+# App: uploaded input files (plans, photos, drone media) are private and can be large
+projects/**/app/files/
+projects/**/app/rounds/*/agent.log
+# Raw user material waiting to be uploaded in the app (private)
+incoming/
+app/branding/app-icon.png
+app/branding/app-icon.ico

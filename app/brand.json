@@ -1,0 +1,7 @@
+{
+  "name": "3D Environment Generator",
+  "short_name": "3D Env Gen",
+  "tagline": "A Virtual Prototype Of Your Environment",
+  "logo": "branding/logo.png",
+  "version": "0.1.0"
+}

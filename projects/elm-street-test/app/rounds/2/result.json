@@ -1,0 +1,15 @@
+{
+  "summary": "Revised the Elm Street Test design: the site location is now Columbus, OH (lat 39.96, lon -83.0, UTC-4), and I added a 6 ft wood privacy fence along the west side, across the rear and along the east side of the backyard. The two-car street-facing garage door and the three boulders in the front tree bed were already modeled that way, so they are unchanged. `./lv validate` reports no errors, and the `./lv check` overlay lines up with the plan: house, garage, driveway, walk, patio, beds and plants all sit on the drawing.",
+  "notes": [
+    "The fence runs on the property lines: x=0 from y=77 to the rear, across y=140, and x=100 from y=72 (the garage's back corner) to the rear. Its start points are the back corners of the house/garage measured in y, but the fence sits on the property line, not against the house.",
+    "The short gap between the house and each side fence (west: x 0 to 25 at y=77; east: x 97 to 100 at y=72) is left open. Add return fence sections or gates if they exist.",
+    "The fence is modeled as 6 ft privacy style with the default wood color.",
+    "Validate warns that the two street trees (street-tree-w, street-tree-e) have their centers outside the property boundary, in the street strip. That matches the plan, so it is intentional.",
+    "The plan image is a rendering with the same legend plants as the model, so plant positions were kept from round 1. The property-line calibration corners are unchanged."
+  ],
+  "questions": [
+    "Are there gates in the privacy fence, for example on the side yards beside the house?",
+    "Should the fence be closed back to the house on each side (west at x=25 and east at the garage)?"
+  ],
+  "requests": []
+}

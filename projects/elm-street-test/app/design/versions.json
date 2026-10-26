@@ -1,0 +1,26 @@
+[
+ {
+  "k": 0,
+  "source": "template",
+  "note": "starting skeleton",
+  "round": null,
+  "time": "2026-10-26T14:32:45",
+  "sha": "ad53e6f02eb1"
+ },
+ {
+  "k": 1,
+  "source": "ai",
+  "note": "round 1",
+  "round": 1,
+  "time": "2026-10-26T14:34:16",
+  "sha": "d74a84080a8f"
+ },
+ {
+  "k": 2,
+  "source": "ai",
+  "note": "round 2",
+  "round": 2,
+  "time": "2026-10-26T14:47:29",
+  "sha": "85f035d77660"
+ }
+]

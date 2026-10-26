@@ -1,0 +1,36 @@
+# Exercises the drone-scan path with a synthetic "scan" (the demo house exported as one
+# OBJ, rotated 30° and offset like raw photogrammetry output).
+project:
+  name: Scan Test
+  units: ft
+
+site:
+  location: {lat: 39.96, lon: -83.0, utc_offset: -4}
+  boundary: [[0, 0], [100, 0], [100, 140], [0, 140]]
+  terrain: {type: scan, margin: 60}
+
+elements:
+  - id: scan
+    kind: mesh
+    role: terrain
+    file: derived/fake_scan.obj
+    alignment:
+      points:
+        - {model: [500.0, 200.0, 50.0], site: [0, 0, 0]}
+        - {model: [526.3965, 215.24, 50.0], site: [100, 0, 0]}
+        - {model: [478.664, 236.955, 50.9754], site: [0, 140, 3.2]}
+        - {model: [505.0605, 252.195, 50.8534], site: [100, 140, 2.8]}
+    keep: [[[23, 43], [99, 43], [99, 79], [23, 79]]]   # house + garage stay from the scan
+
+  - {id: lawn, kind: lawn, polygon: [[0, 0], [100, 0], [100, 140], [0, 140]]}
+  - {id: patio, kind: paving, material: pavers, polygon: [[35, 79], [70, 79], [70, 98], [35, 98]]}
+  - {id: front-bed, kind: bed, smooth: 2, polygon: [[22, 43], [76, 43], [76, 36], [22, 36]]}
+  - {id: hedge, kind: plant_row, species: buxus, sheared: true, line: [[25, 39], [73, 39]], spacing: 3}
+  - {id: maple, kind: plant, species: acer_palmatum, at: [80, 92]}
+  - {id: new-tree, kind: plant, species: cornus_kousa, at: [20, 20]}
+
+views:
+  - {name: aerial, preset: aerial, azimuth: 200, elevation: 35, zoom: 0.9}
+  - {name: back, preset: eye, position: [60, 125], target: [55, 70]}
+
+render: {quality: preview, resolution: [1280, 720], year: 5, season: summer, time: "17:00"}
