@@ -111,7 +111,7 @@ class AppTests(unittest.TestCase):
         class FakeManager:
             def __init__(self):
                 self.submitted = []
-            def submit(self, kind, node, title, fn, lane="gpu"):
+            def submit(self, kind, node, title, fn, lane="gpu", meta=None):
                 self.submitted.append((node, title))
         n = store.create_project("P")
         store.add_input(n, "spec", text="x")
@@ -192,6 +192,92 @@ class AppTests(unittest.TestCase):
         self.assertEqual(publish.status(n)["available"], [])
         with self.assertRaises(RuntimeError):  # nothing made yet → nothing to publish
             publish.build_site(None, n, {"types": ["stills"]})
+
+    def _design(self, n, extra=""):
+        n.design_path.write_text(DESIGN + extra)
+
+    def test_steps_recheck_when_an_earlier_step_changes(self):
+        from app import steps
+        n = store.create_project("P")
+        self._design(n, "  - {id: shed, kind: structure, footprint: [[70,10],[80,10],[80,18],[70,18]], wall_height: 8}\n")
+        d = steps.load(n)
+        for k in steps.KEYS:
+            d["steps"][k] = {"status": "approved", "hash": None}
+        steps.save(n, d)
+        steps.refresh(n)  # records hashes
+        # Move the patio (a ground surface): building outlines and later steps need a recheck, earlier ones don't.
+        n.design_path.write_text(n.design_path.read_text().replace("[[10,10],[30,10]", "[[12,10],[30,10]"))
+        v = steps.view(n)
+        flags = {s["key"]: bool(s.get("recheck")) for s in v["steps"]}
+        self.assertFalse(flags["boundary"])
+        self.assertFalse(flags["surfaces"])          # the changed step itself stays approved
+        self.assertTrue(flags["buildings"])
+        self.assertTrue(flags["plants"])
+        self.assertEqual(next(s for s in v["steps"] if s["key"] == "plants")["recheck_because"], ["Surfaces"])
+        # Changing only a roof (details) leaves the outline step alone.
+        h0 = steps._hash(steps.content(steps.merged_spec(n), "buildings"))
+        n.design_path.write_text(n.design_path.read_text().replace("wall_height: 8", "wall_height: 9"))
+        self.assertEqual(steps._hash(steps.content(steps.merged_spec(n), "buildings")), h0)
+
+    def test_step_rounds_chain_and_import(self):
+        from app import steps
+        n = store.create_project("P")
+        self._design(n)
+        store.add_input(n, "spec", text="x")
+        queued = []
+        steps.SUBMIT = lambda node, rnd: queued.append(rnd)
+        rnd = steps.start(n, "location", new_inputs=True)
+        self.assertEqual((rnd["kind"], rnd["step"], len(rnd["items"])), ("step", "location", 1))
+        self.assertEqual(steps.load(n)["steps"]["location"]["status"], "working")
+        ai._set_round(n, rnd["n"], status="done")
+        steps.after_round(n, rnd, {"summary": "geo-referenced", "revisit": ["nonsense", "ground"]})
+        st = steps.load(n)["steps"]["location"]
+        self.assertEqual((st["status"], st["summary"], st["revisit"]), ("review", "geo-referenced", ["ground"]))
+        nxt = steps.settle(n, "location", "approved")
+        self.assertEqual(nxt, "ground")                  # approving starts the next step
+        self.assertEqual(queued[-1]["step"], "ground")
+        self.assertEqual(queued[-1]["items"], [])        # inputs were frozen with the first step
+        # auto mode: a finished step is accepted provisionally and the chain goes on
+        ai._set_round(n, queued[-1]["n"], status="done")
+        steps.set_auto(n, True)
+        steps.after_round(n, queued[-1], {"summary": "flat"})
+        self.assertEqual(steps.load(n)["steps"]["ground"]["status"], "provisional")
+        self.assertEqual(queued[-1]["step"], "boundary")
+        # A design made before the steps: everything with content becomes provisional; questions move to steps.
+        m = store.create_project("Q")
+        self._design(m)
+        store.add_input(m, "spec", text="y")
+        r = ai.start_round(m, "design")
+        ai._set_round(m, r["n"], status="done", questions=ai.normalize_questions(
+            ["Where exactly is the west property line?", "How tall is the deck above the patio?"]))
+        out = steps.import_existing(m)
+        self.assertEqual(out["questions_moved"], 2)
+        d = steps.load(m)["steps"]
+        self.assertEqual(d["surfaces"]["status"], "provisional")
+        self.assertEqual(d["inventory"]["status"], "pending")      # nothing there yet
+        self.assertEqual(len(d["boundary"]["questions"]), 1)
+        self.assertEqual(len(d["details"]["questions"]), 1)
+        self.assertTrue(m.inputs()["rounds"][-1]["questions_answered"])
+
+    def test_map_edits_on_a_child_variant_go_into_its_overlay(self):
+        import yaml
+        from landviz import sitemap
+        n = store.create_project("P")
+        self._design(n)
+        v = store.create_variant(n, "Bigger patio")
+        proj = project_mod.load(str(v.project_dir), v.variant)
+        data = sitemap.editable(proj, resolve(proj))
+        patio = next(e for e in data["elements"] if e["id"] == "patio")["geoms"][0]["pts"]
+        patio[2] = [patio[2][0] + 3, patio[2][1] + 3]
+        sitemap.apply_edits(proj, [{"id": "patio", "path": ["polygon"], "pts": patio}])
+        overlay = yaml.safe_load(v.design_path.read_text())
+        self.assertIn("patio", overlay["elements_override"])
+        self.assertNotIn("[[10,10],[30,10],[30,30]", v.design_path.read_text())
+        base = yaml.safe_load(n.design_path.read_text())
+        self.assertEqual(base["elements"][0]["polygon"][2], [30, 30])   # the parent is untouched
+        merged = project_mod.load(str(v.project_dir), v.variant)
+        self.assertAlmostEqual(merged.pts(next(e for e in merged.spec["elements"] if e["id"] == "patio")["polygon"],
+                                          "site")[2][0], 30 * 0.3048 + 3, places=2)
 
 
 if __name__ == "__main__":

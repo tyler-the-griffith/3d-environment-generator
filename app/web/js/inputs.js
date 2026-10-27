@@ -1,7 +1,9 @@
 // Input page: sent (frozen) rounds, new inputs, outputs to make, the design file, and Send to AI.
 import { api, enc } from "./api.js";
+import { CONTINUE_TITLE, continueRound as continueIn } from "./jobs.js";
 import { outSpecSection } from "./outspec.js";
-import { bytes, confirmBox, explain, fmtTime, h, icon, lightbox, promptText, toast } from "./ui.js";
+import { stepsSection } from "./steps.js";
+import { bytes, confirmBox, explain, fmtTime, h, icon, lightbox, modal, promptText, toast } from "./ui.js";
 
 const IMG = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
 
@@ -62,7 +64,7 @@ export function renderInput(el, S, A) {
           oninput: (e) => patch({ title: e.target.value }) }),
         h("button", { class: "btn ghost icon", title: "Remove this input", onclick: () => removeItem(it) }, icon("trash"))),
       explain(t.explain || ""),
-      t.text ? h("textarea", { rows: it.type === "lidar" ? 2 : 4, placeholder: t.placeholder || (it.type === "location" ? "e.g. 123 Elm St, Columbus OH — north is up on the plan" : "Write it in your own words…"),
+      t.text ? h("textarea", { rows: ["lidar", "aerial"].includes(it.type) ? 2 : 4, placeholder: t.placeholder || (it.type === "location" ? "e.g. 123 Elm St, Columbus OH — north is up on the plan" : "Write it in your own words…"),
         oninput: (e) => patch({ text: e.target.value }) }, it.text || "") : null,
       t.accepts ? drop : null,
       t.folder ? h("label", { class: "field", style: { marginTop: "8px" } },
@@ -104,12 +106,7 @@ export function renderInput(el, S, A) {
     interrupted: h("span", { class: "chip warn", title: "The app was closed before this round finished" }, "interrupted"),
     awaiting_answers: h("span", { class: "chip warn" }, "needs your answers") }[r.status]);
 
-  const continueRound = async (r) => {
-    try {
-      await api.post(`${nodeUrl}/rounds/${r.n}/continue`);
-      toast(`Opened round ${r.n} in Claude Code in a terminal. Design changes you make there show up here as a new version.`);
-    } catch (e) { toast(e.message, "error"); }
-  };
+  const continueRound = (r) => continueIn(S.nodeId, r.n);
 
   const showRoundFile = async (r, what) => {
     const t = (await api.get(`${nodeUrl}/rounds/${r.n}/${what}`)).text;
@@ -129,9 +126,7 @@ export function renderInput(el, S, A) {
       h("div", { class: "row", style: { marginTop: "8px" } },
         h("button", { class: "btn ghost", onclick: () => showRoundFile(r, "prompt") }, icon("file"), "What was sent"),
         h("button", { class: "btn ghost", onclick: () => showRoundFile(r, "log") }, icon("text"), "Agent log"),
-        r.session_id ? h("button", { class: "btn", onclick: () => continueRound(r),
-          title: "Open this round's Claude Code session in a terminal to see everything it did and talk it through. " +
-            "Edits it makes to the design file are picked up here as a new design version." },
+        r.session_id ? h("button", { class: "btn", onclick: () => continueRound(r), title: CONTINUE_TITLE },
           icon("open"), "Continue in Claude Code") : null,
         ["failed", "cancelled", "interrupted"].includes(r.status) ? h("button", { class: "btn", onclick: async () => {
           try { await api.post(`${nodeUrl}/rounds/${r.n}/retry`); toast("Retrying…"); } catch (e) { toast(e.message, "error"); }
@@ -224,7 +219,9 @@ export function renderInput(el, S, A) {
           icon("cube"), "Open in Blender"),
         h("button", { class: `btn ${N.unpulled_edits ? "primary" : ""}`, onclick: pull,
           title: "Carry hand edits made in Blender into the design" }, icon("pull"),
-          N.unpulled_edits ? "Pull Blender edits (unsaved changes found)" : "Pull Blender edits")));
+          N.unpulled_edits ? "Pull Blender edits (unsaved changes found)" : "Pull Blender edits"),
+        r?.session_id ? h("button", { class: "btn", onclick: () => continueRound(r), title: CONTINUE_TITLE },
+          icon("open"), "Continue in Claude Code") : null));
   };
 
   const reviewImages = () => [
@@ -278,7 +275,7 @@ export function renderInput(el, S, A) {
 
   // ---------------------------------------------------------- send bar
   const pendingReq = N.output_spec.custom.filter((c) => c.status === "pending").length;
-  const hasContent = drafts.some((i) => (i.text || "").trim() || i.files.length || (i.folder || "").trim() || i.type === "lidar");
+  const hasContent = drafts.some((i) => (i.text || "").trim() || i.files.length || (i.folder || "").trim() || ["lidar", "aerial"].includes(i.type));
   const provider = S.app.providers[S.settings.ai.provider];
   let why = "";
   if (working) why = `${S.app.ai_name} is working on round ${lastRound.n}.`;
@@ -286,7 +283,30 @@ export function renderInput(el, S, A) {
   else if (!provider?.available) why = `${provider?.label || "The AI provider"} isn't ready: ${provider?.status}. See Settings → AI.`;
   else if (!drafts.length && !pendingReq) why = rounds.length ? "Add a new input or an output request to send another round." : "Add at least one input first.";
   else if (drafts.length && !hasContent) why = "Your new inputs are empty: add text or files.";
+  const useSteps = !isVariant && N.steps?.enabled;
+  const sendSteps = () => {
+    const P = N.steps;
+    const firstOpen = P.steps.find((s) => !["approved", "provisional"].includes(s.status));
+    let from = (firstOpen || P.steps[0]).key;
+    let auto = P.auto;
+    const sel = h("select", { onchange: (e) => { from = e.target.value; } },
+      P.steps.map((s, i) => h("option", { value: s.key, selected: s.key === from }, `${i + 1}. ${s.label}`)));
+    modal({ title: `Send to ${S.app.ai_name}`, body: h("div", {},
+      h("p", {}, `${drafts.length} new input${drafts.length === 1 ? "" : "s"}${pendingReq ? ` and ${pendingReq} output request(s)` : ""} will be sent and then frozen. ` +
+        "To change them later you'll start a variant."),
+      h("label", { class: "field" }, h("span", {}, "Work through the steps starting at"), sel,
+        h("span", { class: "muted small" }, "Steps already settled stay as they are unless they come after this one; then they're flagged for a recheck if something they depend on changes.")),
+      h("label", { style: { display: "flex", alignItems: "flex-start", marginTop: "12px", gap: "8px", cursor: "pointer" } },
+        h("input", { type: "checkbox", checked: auto, style: { marginTop: "4px" }, onchange: (e) => { auto = e.target.checked; } }),
+        h("span", {}, h("b", {}, "Use best judgement for all steps"), h("div", { class: "muted small" },
+          "Don't pause for reviews: every step is accepted as “best judgement for now” and can be reviewed later.")))),
+      actions: [{ label: "Cancel" }, { label: `Send to ${S.app.ai_name}`, primary: true, onClick: async () => {
+        try { await api.post(`${nodeUrl}/steps/start`, { from, auto }); toast(`Sent to ${S.app.ai_name}`); await A.refreshNode(); A.render(); }
+        catch (e) { toast(e.message, "error"); }
+      } }] });
+  };
   const send = async () => {
+    if (useSteps && drafts.length) { sendSteps(); return; }
     if (drafts.length && !(await confirmBox(`Send to ${S.app.ai_name}?`,
       `${drafts.length} new input${drafts.length === 1 ? "" : "s"}${pendingReq ? ` and ${pendingReq} output request(s)` : ""} will be sent and then frozen. ` +
       (drafts.length === 1 ? "To change it" : "To change them") + " later you'll start a variant.", `Send to ${S.app.ai_name}`))) return;
@@ -311,6 +331,7 @@ export function renderInput(el, S, A) {
       h("pre", { class: "mono", style: { whiteSpace: "pre-wrap", maxHeight: "160px", overflow: "auto" } }, (aiJob?.log_tail || []).join("\n")),
       aiJob ? h("button", { class: "btn", onclick: () => api.post(`/api/jobs/${aiJob.id}/cancel`) }, icon("stop"), "Cancel") : null) : null,
     awaiting ? questionForm(awaiting, true) : null,
+    useSteps ? stepsSection(S, A) : null,
     review(),
     followUp ? questionForm(followUp, false) : null,
     rounds.length ? h("div", { class: "section" },

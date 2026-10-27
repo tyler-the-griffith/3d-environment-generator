@@ -48,6 +48,7 @@ class Project:
     units: str
     catalog: Catalog
     plan_frame: geometry.PlanFrame | None
+    aerial_frame: geometry.PlanFrame | None = None
     issues: list[Issue] = field(default_factory=list)
     sets: list[str] = field(default_factory=list)
     auto_ids: set[str] = field(default_factory=set)
@@ -81,12 +82,16 @@ class Project:
         return units.length(v, self.units)
 
     def pts(self, raw, frame: str | None = None):
-        """Convert authored points to site meters (2D or 3D). frame: 'site' (default) or 'plan'."""
+        """Convert authored points to site meters (2D or 3D). frame: 'site' (default), 'plan' (landscaper's
+        drawing pixels) or 'aerial' (public aerial photo pixels)."""
         frame = frame or self.spec.get("defaults", {}).get("frame", "site")
-        if frame == "plan":
-            if self.plan_frame is None:
-                raise SpecError("points use frame: plan but plan.calibration is missing")
-            xy = self.plan_frame.to_site([(float(p[0]), float(p[1])) for p in raw])
+        if frame in ("plan", "aerial"):
+            pf = self.plan_frame if frame == "plan" else self.aerial_frame
+            if pf is None:
+                raise SpecError("points use frame: plan but plan.calibration is missing" if frame == "plan" else
+                                "points use frame: aerial but there's no aerial photo (lv aerial fetch) or "
+                                "site.location.origin isn't set")
+            xy = pf.to_site([(float(p[0]), float(p[1])) for p in raw])
             return [(x, y, units.length(p[2], self.units)) if len(p) > 2 else (x, y)
                     for (x, y), p in zip(xy, raw)]
         if frame != "site":
@@ -95,6 +100,17 @@ class Project:
 
     def pt(self, raw, frame=None):
         return self.pts([raw], frame)[0]
+
+    def to_authored(self, pts_m, frame: str | None = None):
+        """Inverse of pts: site meters → points in the given authoring frame and project units."""
+        frame = frame or self.spec.get("defaults", {}).get("frame", "site")
+        if frame in ("plan", "aerial"):
+            pf = self.plan_frame if frame == "plan" else self.aerial_frame
+            if pf is None:
+                raise SpecError(f"no {frame} frame to convert into")
+            return [[round(x, 1), round(y, 1)] for x, y in pf.to_pixels(pts_m)]
+        k = units.TO_METERS[self.units]
+        return [[round(p[0] / k, 3), round(p[1] / k, 3)] for p in pts_m]
 
 
 def resolve_project_dir(name_or_path: str) -> Path:
@@ -303,4 +319,12 @@ def load(name_or_path: str, variant: str | None = None, sets: list[str] | None =
     proj = Project(dir=pdir, spec=spec, variant=variant, units=units_name, catalog=catalog,
                    plan_frame=_build_plan_frame(spec, units_name), sets=list(sets or []),
                    auto_ids=auto_ids, load_issues=load_issues)
+    loc = (spec.get("site") or {}).get("location") or {}
+    if loc.get("origin"):
+        from . import aerial
+        try:
+            proj.aerial_frame = aerial.frame(pdir, [float(v) for v in loc["origin"]],
+                                             float(loc.get("north_offset_deg", 0.0)))
+        except (TypeError, ValueError):
+            pass
     return proj

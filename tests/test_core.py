@@ -225,3 +225,127 @@ class RoofsAndGeo(unittest.TestCase):
         self.assertAlmostEqual(float(lidar.sample(grid, meta, [3.3], [-2.7])[0]), 100 + 1.65 - 0.675, places=6)
         e, n = lidar.site_to_local(5.0, 0.0, meta, (40.0, -105.0), 0.0)
         self.assertAlmostEqual(float(e), 5.0, places=3)
+
+
+class YamlEditAndMap(unittest.TestCase):
+    DESIGN = """# keep me
+project: {name: T, units: ft}
+site:
+  boundary: [[0,0],[100,0],[100,100],[0,100]]   # lot
+elements:
+  - {id: patio, kind: paving, polygon: [[10,10],[30,10],[30,30],[10,30]]}
+  # a tree
+  - id: tree
+    kind: plant
+    species: acer_rubrum
+    at: [60, 60]
+  - id: house
+    kind: structure
+    wings:
+      - footprint:
+          - [40, 40]
+          - [60, 40]
+          - [60, 55]
+        wall_height: 9
+"""
+
+    def test_targeted_edits_keep_the_rest(self):
+        import yaml
+        from landviz import yamledit as Y
+        t = Y.set_value(self.DESIGN, Y.element_path(self.DESIGN, "patio") + ["polygon"], [[11, 10], [30, 10], [30, 30]])
+        self.assertIn("# keep me", t)
+        self.assertIn("# lot", t)
+        self.assertIn("# a tree", t)
+        self.assertEqual(yaml.safe_load(t)["elements"][0]["polygon"], [[11, 10], [30, 10], [30, 30]])
+        t = Y.set_value(t, Y.element_path(t, "tree") + ["spread"], 20)       # new key in a block mapping
+        t = Y.set_value(t, Y.element_path(t, "patio") + ["frame"], "site")   # new key in a flow mapping
+        t = Y.set_value(t, Y.element_path(t, "house") + ["wings", 0, "footprint"], [[40, 40], [62, 40], [62, 55]])
+        d = yaml.safe_load(t)
+        self.assertEqual(d["elements"][1]["spread"], 20)
+        self.assertEqual(d["elements"][0]["frame"], "site")
+        self.assertEqual(d["elements"][2]["wings"][0]["footprint"][1], [62, 40])
+        self.assertEqual(d["elements"][2]["wings"][0]["wall_height"], 9)
+        t = Y.delete_item(t, Y.element_path(t, "tree"))
+        t = Y.append_item(t, ["elements"], {"id": "rock", "kind": "boulder", "at": [5, 5]})
+        self.assertEqual([e["id"] for e in yaml.safe_load(t)["elements"]], ["patio", "house", "rock"])
+
+    def test_map_edits_round_trip_in_each_frame(self):
+        import shutil
+        import yaml
+        from landviz import sitemap
+        d = Path(tempfile.mkdtemp())
+        try:
+            # elements authored in plan pixels (calibrated 10 px per foot): edits come back in pixels
+            design = self.DESIGN.replace("project: {name: T, units: ft}", "project: {name: T, units: ft}\nplan:\n  calibration:\n"
+                                         "    points: [{px: [0, 1000], at: [0, 0]}, {px: [1000, 1000], at: [100, 0]}]")
+            design = design.replace("{id: patio, kind: paving, polygon: [[10,10],[30,10],[30,30],[10,30]]}",
+                                    "{id: patio, kind: paving, frame: plan, polygon: [[100,900],[300,900],[300,700],[100,700]]}")
+            (d / "project.yaml").write_text(design)
+            proj = project_mod.load(str(d))
+            scene = resolve(proj)
+            data = sitemap.editable(proj, scene)
+            patio = next(e for e in data["elements"] if e["id"] == "patio")["geoms"][0]["pts"]
+            self.assertAlmostEqual(patio[1][0], 30 * 0.3048, places=4)          # 300 px = 30 ft
+            patio[1] = [patio[1][0] + 0.3048, patio[1][1]]                         # move one corner 1 ft east
+            sitemap.apply_edits(proj, [{"id": "patio", "path": ["polygon"], "pts": patio},
+                                       {"id": "tree", "path": ["spread"], "length": 3.048}])
+            out = yaml.safe_load((d / "project.yaml").read_text())
+            self.assertEqual(out["elements"][0]["polygon"], [[100, 900], [310.0, 900.0], [300, 700], [100, 700]])
+            self.assertEqual(out["elements"][1]["spread"], 10.0)
+            self.assertIn("# a tree", (d / "project.yaml").read_text())
+        finally:
+            shutil.rmtree(d)
+
+    def test_editor_fields_rename_and_settings(self):
+        import shutil
+        import yaml
+        from landviz import sitemap
+        d = Path(tempfile.mkdtemp())
+        try:
+            (d / "project.yaml").write_text(self.DESIGN + "inventory:\n  - {id: f1, category: patio, element: patio, at: [20, 20]}\n")
+            (d / "edits.yaml").write_text("elements:\n  patio: {material: pavers}\n")
+            (d / "variants" / "opt").mkdir(parents=True)
+            (d / "variants" / "opt" / "variant.yaml").write_text("parent: base\nelements_remove: [patio]\n")
+            proj = project_mod.load(str(d))
+            sitemap.apply_edits(proj, [
+                {"id": "patio", "path": ["material"], "value": "flagstone"},
+                {"rename": {"from": "patio", "to": "back-patio"}},
+                {"id": "back-patio", "path": ["note"], "value": "renamed on the map"},
+                {"spec": ["site", "location", "north_offset_deg"], "value": 12},
+                {"id": "tree", "replace": {"id": "tree", "kind": "plant", "species": "betula_nigra", "at": [61, 60]}},
+            ])
+            out = yaml.safe_load((d / "project.yaml").read_text())
+            el = out["elements"][0]
+            self.assertEqual((el["id"], el["material"], el["note"]), ("back-patio", "flagstone", "renamed on the map"))
+            self.assertEqual(out["elements"][1], {"id": "tree", "kind": "plant", "species": "betula_nigra", "at": [61, 60]})
+            self.assertEqual(out["site"]["location"]["north_offset_deg"], 12)
+            self.assertEqual(out["inventory"][0]["element"], "back-patio")       # references follow the rename
+            self.assertIn("back-patio", yaml.safe_load((d / "edits.yaml").read_text())["elements"])
+            self.assertEqual(yaml.safe_load((d / "variants" / "opt" / "variant.yaml").read_text())["elements_remove"], ["back-patio"])
+            self.assertIn("# a tree", (d / "project.yaml").read_text())
+            with self.assertRaises(project_mod.SpecError):  # names must be unique
+                sitemap.apply_edits(project_mod.load(str(d)), [{"rename": {"from": "back-patio", "to": "house"}}])
+        finally:
+            shutil.rmtree(d)
+
+    def test_aerial_frame(self):
+        from landviz import aerial, photos
+        # fetch() always asks for a square in meters (the frame is a similarity: one scale)
+        dlon = 0.001 * photos.M_PER_DEG_LAT / (photos.M_PER_DEG_LON_EQ * math.cos(math.radians(40.585)))
+        meta = {"bbox": [-105.0850 - dlon, 40.5840, -105.0850 + dlon, 40.5860], "size": [600, 600]}
+        origin = (40.5850, -105.0850)
+        pf = geometry.PlanFrame(*aerial.control_points(meta, origin))
+        x, y = pf.to_site([(300, 300)])[0]
+        self.assertAlmostEqual(x, 0, places=1)    # the photo's center is the origin
+        self.assertAlmostEqual(y, 0, places=1)
+        x, y = pf.to_site([(600, 0)])[0]          # north-east corner
+        self.assertGreater(x, 0)
+        self.assertGreater(y, 0)
+        self.assertAlmostEqual(y, 0.001 * photos.M_PER_DEG_LAT, delta=1.0)
+        back = pf.to_pixels([(x, y)])[0]
+        self.assertAlmostEqual(back[0], 600, places=3)
+        self.assertAlmostEqual(back[1], 0, places=3)
+
+
+if __name__ == "__main__":
+    unittest.main()

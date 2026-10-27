@@ -454,6 +454,60 @@ def _lidar_location(args, proj):
     sys.exit("no location: pass --address or --latlon, or add photos with GPS / site.location.origin")
 
 
+def cmd_aerial(args):
+    from . import aerial, units
+    proj = project_mod.load(args.project)
+    if args.aerial_cmd == "fetch":
+        lat, lon, how = _lidar_location(args, proj)
+        print(f"location: {lat:.6f}, {lon:.6f}  ({how})")
+        meta = aerial.fetch(proj.dir, lat, lon, args.radius, args.res, place=how)
+        print(f"aerial photo → {aerial.image_path(proj.dir)} ({meta['size'][0]} px, {meta['m_per_px']:.2f} m/px)")
+        proj = project_mod.load(args.project)
+    meta = aerial.load(proj.dir)
+    if meta is None:
+        sys.exit("no aerial photo yet — run `lv aerial fetch` first")
+    if args.aerial_cmd == "fetch" or args.aerial_cmd == "info":
+        w, s_, e, n = meta["bbox"]
+        print(f"aerial photo: {meta['source']}, fetched {meta['fetched']}, {meta['size'][0]}×{meta['size'][1]} px "
+              f"at {meta['m_per_px']:.2f} m/px, bounds lat {s_:.6f}–{n:.6f}, lon {w:.6f}–{e:.6f}")
+        if proj.aerial_frame is None:
+            c = meta["center"]
+            print("  The site isn't geo-referenced yet. Set site.location.origin to the lat/lon of site (0, 0), e.g.\n"
+                  f"    origin: [{c[0]:.6f}, {c[1]:.6f}]   # the photo's center\n"
+                  "  then author points in aerial pixels with `frame: aerial` (or convert with `lv aerial locate`).")
+        else:
+            print("  frame: aerial is available (points in aerial-photo pixels, x right, y down).")
+    elif args.aerial_cmd == "locate":
+        k = units.TO_METERS[proj.units]
+        for spec in args.px:
+            px, py = (float(v) for v in spec.split(","))
+            lat, lon = aerial.px_to_latlon(meta, px, py)
+            line = f"px {px:.0f},{py:.0f} → lat/lon {lat:.6f}, {lon:.6f}"
+            if proj.aerial_frame is not None:
+                x, y = proj.aerial_frame.to_site([(px, py)])[0]
+                line += f" → site {x / k:.2f}, {y / k:.2f} {proj.units}"
+            print(line)
+
+
+def cmd_map(args):
+    """Top-down 2D map of chosen elements over a backdrop, with a grid in project units."""
+    from . import sitemap
+    prep = _prepare(args)
+    focus = None
+    if args.focus:
+        focus = {f.strip() for f in args.focus.split(",") if f.strip()}
+    if args.kinds:
+        kinds = {k.strip() for k in args.kinds.split(",")}
+        focus = (focus or set()) | {el.get("id") for el in prep.project.spec.get("elements") or []
+                                    if isinstance(el, dict) and el.get("kind") in kinds}
+    out = prep.project.derived / f"map_{prep.state}{'_' + args.name if args.name else ''}.png"
+    sitemap.render_map(prep.project, prep.scene, out, focus, args.backdrop, args.title or "",
+                       show_inventory=args.inventory, width=args.width)
+    bds = [b["key"] for b in sitemap.backdrops(prep.project, prep.scene)]
+    print(f"map → {out}")
+    print(f"  backdrops available: {', '.join(bds) or 'none'} (choose with --backdrop)")
+
+
 def cmd_lidar(args):
     from . import lidar
     proj = project_mod.load(args.project)
@@ -882,6 +936,34 @@ def main(argv=None):
     p.add_argument("project")
     p.add_argument("--extent", help="x0,y0,x1,y1 in project units (default: boundary + margin)")
     p.set_defaults(fn=cmd_lidar)
+
+    aer = sub.add_parser("aerial", help="public straight-down aerial photo (USGS NAIP) of the site").add_subparsers(
+        dest="aerial_cmd", required=True)
+    p = aer.add_parser("fetch", help="download the aerial photo around the site")
+    p.add_argument("project")
+    p.add_argument("--address", help="US street address (geocoded by the US Census)")
+    p.add_argument("--latlon", help="coordinates, e.g. '40.5729, -105.1438'")
+    p.add_argument("--radius", type=float, default=80.0, help="meters around the location (default 80)")
+    p.add_argument("--res", type=float, default=0.3, help="meters per pixel requested (default 0.3)")
+    p.set_defaults(fn=cmd_aerial)
+    p = aer.add_parser("info", help="what was fetched and whether frame: aerial is usable")
+    p.add_argument("project")
+    p.set_defaults(fn=cmd_aerial)
+    p = aer.add_parser("locate", help="aerial pixel → lat/lon and site coordinates")
+    p.add_argument("project")
+    p.add_argument("--px", action="append", required=True, metavar="X,Y", help="pixel position in aerial/aerial.jpg")
+    p.set_defaults(fn=cmd_aerial)
+
+    p = with_project(sub.add_parser("map", help="top-down 2D map of chosen elements over a backdrop (no Blender)"))
+    p.add_argument("--focus", help="comma-separated element ids to highlight (default: all)")
+    p.add_argument("--kinds", help="comma-separated element kinds to highlight, e.g. structure,deck")
+    p.add_argument("--backdrop", help="aerial | plan | lidar | photo:<name> (default: the best available)")
+    p.add_argument("--inventory", action="store_true", help="also draw the feature inventory")
+    p.add_argument("--name", help="suffix for the output file")
+    p.add_argument("--title")
+    p.add_argument("--width", type=int, default=1800)
+    state_flags(p)
+    p.set_defaults(fn=cmd_map)
 
     p = with_project(sub.add_parser("model", help="save the 3D model file (.blend) as an output"))
     p.add_argument("--quality", choices=list(QUALITY_PRESETS))

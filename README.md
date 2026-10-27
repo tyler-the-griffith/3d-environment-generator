@@ -30,6 +30,18 @@ option (below). The bundled **Demo** project renders right away.
 your inputs ──(AI, once per round)──▶ design file ──(deterministic code)──▶ one 3D model ──▶ every output
 ```
 
+- **A project is the property as it exists.** Its base design is a simulation of what's there
+  today. Ideas for changing it (a landscaper's proposal, a renovation) are **child variants**
+  that inherit the existing environment and describe only what changes.
+- **Built step by step.** The existing environment is worked out in order: location &
+  orientation → ground elevation → property boundary → feature inventory → ground surfaces →
+  building outlines → building details → fences & walls → plants, trees & boulders. After each
+  step the AI pauses: check it on the **map** (the step's outlines over an aerial photo, the
+  plan, a LiDAR height map or a straight-down drone photo), then **Approve**, **adjust it
+  yourself** (drag corners and edges, move, resize, remove or add elements; saved straight into
+  the design file), **pin comments** on the map and have the step redone, or choose **Use best
+  judgement for now** and come back later. A switch lets it use its best judgement for all
+  remaining steps. Changing an earlier step flags the later ones for a recheck.
 - **Input page.** Add inputs: the landscaper's plan, specification/notes, site photos, drone
   media, documents, inspiration images, a 3D scan, the site location. Then press **Send to
   Claude**. The AI writes the **design file**: exact positions and sizes of every element.
@@ -73,6 +85,9 @@ your inputs ──(AI, once per round)──▶ design file ──(deterministic
   use the photos' GPS). The app fetches free USGS data: measured terrain everywhere in the US,
   and where a laser survey exists, measured roof and tree heights plus a true-scale height map.
   The point-cloud part needs the optional extras: `./launch --setup` (one time).
+- **Public aerial photo.** Add a "Public aerial photo" input (same location options). The app
+  fetches a free straight-down USGS NAIP orthophoto (US only, ~0.6 m detail): no lean, lined up
+  with the map. It's the map editor's backdrop and the AI traces outlines from it.
 - **Roofs.** Houses are built from overlapping wings, each with its own eave height and roof
   (gable, hip, half-hip, gambrel, mansard, shed, flat), with porches on posts and decks with
   railings and stairs.

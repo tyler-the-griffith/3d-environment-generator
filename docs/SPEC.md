@@ -9,6 +9,10 @@ Points may instead be authored in **plan pixels** (`frame: plan` on an element, 
 `defaults.frame: plan` for all) once `plan.calibration` is set. That's the fastest way to
 transcribe a landscaper's drawing: read pixel positions off the plan image.
 
+`frame: aerial` does the same for the public aerial photo (`lv aerial fetch` saves it in the
+project's `aerial/` folder with its lat/lon bounds): pixels of `aerial/aerial.jpg`, x right,
+y down. It needs `site.location.origin`; `lv aerial locate <project> --px X,Y` converts.
+
 ## Top level
 
 | key | meaning |
@@ -21,6 +25,7 @@ transcribe a landscaper's drawing: read pixel positions off the plan image.
 | `defaults.frame` | `site` (default) or `plan` |
 | `catalogs` | extra species YAML files (a `species.yaml` beside project.yaml is loaded automatically) |
 | `elements` | the landscape, see below |
+| `inventory` | the feature inventory from the build steps: `[{id, category, label, polygon \| at, frame, note, element}]`, rough outlines of everything on the property (house, garage, shed, patio, court, fence, tree…). Not drawn in the model; later steps turn each entry into elements. |
 | `views` | cameras, see below |
 | `render` | `quality` (`draft` \| `preview` \| `final` \| `web`), `resolution`, `year` (years after planting or `mature`), `season` or `date`, `time` (`"HH:MM"` local), `exposure` (default −3.5), `samples`, `seed` |
 | `environment` | `sky: physical \| hdri`, `hdri` (path), `hdri_strength`, `haze`, `cloudiness` 0–1, `surroundings: lawn \| field \| none` |

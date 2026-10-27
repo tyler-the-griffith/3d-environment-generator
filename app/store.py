@@ -55,6 +55,14 @@ INPUT_TYPES = {
                              "tree heights and true-scale building outlines. The location (and an address, if you give "
                              "one, via the US Census geocoder) is sent to those public services. Surveys can be years "
                              "old, so trees may have grown since."},
+    "aerial":    {"label": "Public aerial photo", "text": True, "placeholder":
+                  "Address or coordinates (e.g. 40.5729, -105.1438) — or leave blank to use the location from your "
+                  "other inputs (photo GPS, site location)",
+                  "explain": "Allow the use of a free public aerial photo of the property (USGS NAIP, US only, about "
+                             "0.6 m detail). It's taken straight down and lined up with the map, so building edges and "
+                             "ground surfaces can be traced without the lean of a drone photo, and it's the backdrop of "
+                             "the map editor. The location (and an address, if you give one, via the US Census "
+                             "geocoder) is sent to those public services. Photos are a few years old."},
     "location":  {"label": "Site location", "text": True,
                   "explain": "Address or coordinates, and which way is north on the plan. Sets real sun angles "
                              "and shadows."},

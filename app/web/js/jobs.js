@@ -1,6 +1,18 @@
 // Jobs drawer: AI rounds, builds, renders, videos — with progress, log tails and cancel.
-import { api } from "./api.js";
-import { fmtTime, h, icon } from "./ui.js";
+import { api, enc } from "./api.js";
+import { fmtTime, h, icon, toast } from "./ui.js";
+
+// Opens an AI round's Claude Code session in a terminal (used by the jobs list, the review panel
+// and the round history).
+export async function continueRound(nodeId, n) {
+  try {
+    await api.post(`/api/nodes/${enc(nodeId)}/rounds/${n}/continue`);
+    toast(`Opened round ${n} in Claude Code in a terminal. Design changes you make there show up here as a new version.`);
+  } catch (e) { toast(e.message, "error"); }
+}
+
+export const CONTINUE_TITLE = "Open this round's Claude Code session in a terminal to see everything it did and talk it through. " +
+  "Edits it makes to the design file are picked up here as a new design version.";
 
 export function jobsBadge(n) {
   return h("span", { class: "jobs-badge" }, n);
@@ -30,6 +42,9 @@ export function renderJobs(S, A) {
           const { modal } = await import("./ui.js");
           modal({ title: j.title, wide: true, body: h("pre", { class: "mono", style: { whiteSpace: "pre-wrap", margin: 0 } }, (full.log || []).join("\n")) });
         } }, icon("text"), "Full log"),
+        j.kind === "ai_round" && j.node && j.meta?.round && j.meta.provider === "claude_code" && !["running", "queued"].includes(j.status)
+          ? h("button", { class: "btn ghost", title: CONTINUE_TITLE, onclick: () => continueRound(j.node, j.meta.round) },
+            icon("open"), "Continue in Claude Code") : null,
         j.node ? h("button", { class: "btn ghost", onclick: () => A.openNode(j.node) }, icon("chevron"), "Go to project") : null),
     )) : h("div", { class: "muted", style: { padding: "12px" } }, "No jobs yet.")));
 }

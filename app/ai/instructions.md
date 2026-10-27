@@ -74,6 +74,25 @@ options is meant, whether a structure stays or goes), ask before building:
 
 If nothing material is unclear, skip this and build straight away.
 
+# Build steps
+
+The existing property (a project's base design) is built in steps, in this order: location &
+orientation, ground elevation, property boundary, feature inventory, ground surfaces, building
+outlines, building details, fences/walls/fixtures, plants/trees/boulders. When the task says
+"This round: step N", it overrides the general advice here:
+
+- Work **only** on that step's part of the design. Everything else stays exactly as it is; earlier
+  steps were checked by the homeowner and later steps haven't happened yet.
+- The design file may still hold the starting template's placeholders (e.g. a sample boundary);
+  replace a placeholder only when it belongs to your step.
+- Verify with `./lv map` (fast, 2D, over the aerial photo / plan / LiDAR) rather than `./lv check`,
+  except in the last step. Positions on the map's grid are in project units.
+- Comments the homeowner pinned on the map come with exact site coordinates: go and look there.
+- Anything wrong in an earlier step goes in `notes` + `revisit`, not into the design.
+
+Child variants (renovation ideas, a landscaper's proposal) don't use steps: they describe their
+changes to the parent in one round.
+
 # Verify your work
 
 Run `./lv validate <args>` until it reports no errors. Then run `./lv check <args>`: it renders
@@ -90,6 +109,7 @@ Write the result file (path given in the task) as JSON:
   "summary": "2–4 plain-English sentences on what you built (counts, notable features).",
   "notes": ["assumptions, estimates, anything the homeowner should double-check"],
   "questions": ["only things that came up *while* building and can wait for the next round"],
-  "requests": [{"id": "<custom request id>", "status": "accepted|declined", "message": "what you did, or why it isn't possible"}]
+  "requests": [{"id": "<custom request id>", "status": "accepted|declined", "message": "what you did, or why it isn't possible"}],
+  "revisit": ["step keys whose earlier work looks wrong (build steps only)"]
 }
 ```

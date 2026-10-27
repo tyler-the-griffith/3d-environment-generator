@@ -77,14 +77,17 @@ def main():
 
     @beta_tool
     def run_lv(command: str, args: str = "") -> str:
-        """Run a framework command: `validate` (check the design) or `species` (search the plant catalog).
+        """Run a framework command: `validate` (check the design), `species` (search the plant catalog),
+        `aerial` (info / locate pixels on the aerial photo), `lidar` (info / heights).
 
         Args:
-            command: Either "validate" or "species".
+            command: One of "validate", "species", "aerial", "lidar".
             args: Arguments, e.g. the project path (and --variant name) for validate, or search text for species.
         """
-        if command not in ("validate", "species"):
-            return "Error: only validate and species are available"
+        if command not in ("validate", "species", "aerial", "lidar"):
+            return "Error: only validate, species, aerial and lidar are available"
+        if command in ("aerial", "lidar") and args.split()[:1] not in (["info"], ["locate"], ["heights"]):
+            return "Error: aerial/lidar take info, locate or heights here"
         if re.search(r"[;&|`$<>]", args):
             return "Error: invalid characters in args"
         print(f"→ lv {command} {args}", flush=True)

@@ -22,7 +22,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import ai, config, generate, publish, store
+from . import ai, config, generate, publish, steps, store
 from .jobs import BUS, MANAGER
 
 TOKEN = secrets.token_urlsafe(24)
@@ -140,6 +140,7 @@ def api_node(h, m):
                           for f in sorted((n.project_dir / "renders" / n.state / "photo-match").glob("*.png"))
                           if not f.name.endswith(".model.png")],
         "busy": [j.public() for j in MANAGER.busy_for(n.id)],
+        "steps": _steps_view(n),
         "unpulled_edits": _unpulled(n),
         "files_root": f"/files/{n.dir.relative_to(config.projects_root()).as_posix()}/app",
     }
@@ -258,7 +259,7 @@ def api_send(h, m):
     except ValueError as e:
         raise ApiError(409, str(e)) from None
     job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: round {rnd['n']} — {n.meta()['title']}",
-                         lambda job: ai.run_round(job, n, rnd), lane="ai")
+                         lambda job: ai.run_round(job, n, rnd), lane="ai", meta=ai.round_meta(rnd))
     BUS.publish("node_changed", {"node": n.id})
     return {"job": job.public(), "round": rnd}
 
@@ -277,7 +278,7 @@ def api_retry(h, m):
                 c["status"], c["round"] = "in_progress", rnd["n"]
         n.save_output_spec(spec)
     job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: retry round {rnd['n']}",
-                         lambda job: ai.run_round(job, n, rnd), lane="ai")
+                         lambda job: ai.run_round(job, n, rnd), lane="ai", meta=ai.round_meta(rnd))
     return {"job": job.public()}
 
 
@@ -301,7 +302,8 @@ def api_answers(h, m):
             cur["status"] = "queued"
             n.save_inputs(d)
         job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: round {rnd['n']} (with your answers) — "
-                             f"{n.meta()['title']}", lambda job: ai.answer_round(job, n, rnd, answers), lane="ai")
+                             f"{n.meta()['title']}", lambda job: ai.answer_round(job, n, rnd, answers), lane="ai",
+                             meta=ai.round_meta(rnd))
         BUS.publish("node_changed", {"node": n.id})
         return {"job": job.public()}
     if rnd["status"] == "done" and rnd.get("questions") and not rnd.get("questions_answered"):
@@ -319,7 +321,7 @@ def api_answers(h, m):
         except ValueError as e:
             raise ApiError(409, str(e)) from None
         job = MANAGER.submit("ai_round", n.id, f"{ai.display_name()}: round {new['n']} — {n.meta()['title']}",
-                             lambda job: ai.run_round(job, n, new), lane="ai")
+                             lambda job: ai.run_round(job, n, new), lane="ai", meta=ai.round_meta(new))
         BUS.publish("node_changed", {"node": n.id})
         return {"job": job.public(), "round": new}
     raise ApiError(409, "this round isn't waiting for answers")
@@ -430,6 +432,199 @@ def api_download_all(h, m):
                     z.write(src, f"{proj_title}/{node_title}/{folder}/{name}")
     h.send_file(tmp, f"{proj_title} - {node_title}.zip", "application/zip", delete=True)
     return None
+
+
+# ---------------------------------------------------------------- build steps (the existing environment)
+
+
+def _url(p: Path) -> str | None:
+    root = config.projects_root().resolve()
+    p = Path(p).resolve()
+    if not str(p).startswith(str(root)) or not p.exists():
+        return None
+    return f"/files/{p.relative_to(root).as_posix()}?v={int(p.stat().st_mtime)}"
+
+
+def _steps_view(n: store.Node) -> dict:
+    v = steps.view(n)
+    for st in v["steps"]:
+        if st.get("map"):
+            st["map_url"] = _url(n.project_dir / "derived" / st["map"])
+    return v
+
+
+def _submit_step(node: store.Node, rnd: dict):
+    st = steps.BY_KEY[rnd["step"]]
+    MANAGER.submit("ai_round", node.id, f"{ai.display_name()}: {st['label']} — {node.meta()['title']}",
+                   lambda job: ai.run_round(job, node, rnd), lane="ai", meta={**ai.round_meta(rnd), "step": rnd["step"]})
+    BUS.publish("node_changed", {"node": node.id})
+
+
+steps.SUBMIT = _submit_step
+
+
+def _ai_ready():
+    prov = ai.provider_status()[config.load_settings()["ai"]["provider"]]
+    if not prov["available"]:
+        raise ApiError(409, f"{prov['label']} isn't ready: {prov['status']} (Settings → AI)")
+
+
+def _step_call(fn):
+    try:
+        return fn()
+    except ValueError as e:
+        raise ApiError(409, str(e)) from None
+
+
+@route("GET", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/steps")
+def api_steps(h, m):
+    return _steps_view(node_or_404(m["nid"]))
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/steps/start")
+def api_steps_start(h, m):
+    """From the Send button: freeze new inputs and run the steps from `from` (pausing after each unless auto)."""
+    n = node_or_404(m["nid"])
+    b = h.json()
+    _ai_ready()
+    key = b.get("from") or steps.KEYS[0]
+    rnd = _step_call(lambda: steps.start(n, key, note=str(b.get("note") or ""), auto=bool(b.get("auto")), new_inputs=True))
+    return {"round": rnd}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/steps/(?P<key>[a-z]+)/(?P<act>approve|judgement|redo)")
+def api_step_action(h, m):
+    n = node_or_404(m["nid"])
+    key, act = m["key"], m["act"]
+    if key not in steps.BY_KEY:
+        raise ApiError(404, "no such step")
+    b = h.json()
+    if act == "redo":
+        _ai_ready()
+        note = str(b.get("note") or "").strip()
+        if b.get("answers") is not None:
+            ans = steps.answer_questions(n, key, b["answers"])
+            note = (note + "\n\nAnswers to your questions:\n" + ans).strip() if ans else note
+        rnd = _step_call(lambda: steps.start(n, key, note=note))
+        return {"round": rnd}
+    if act == "approve" or act == "judgement":
+        if b.get("answers") is not None:  # questions answered with "best judgement" just close
+            steps.answer_questions(n, key, b["answers"])
+        nxt = _step_call(lambda: steps.settle(n, key, "approved" if act == "approve" else "provisional",
+                                              by="you"))
+        BUS.publish("node_changed", {"node": n.id})
+        return {"next": nxt}
+    raise ApiError(404, "unknown action")
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/steps/auto")
+def api_steps_auto(h, m):
+    n = node_or_404(m["nid"])
+    _step_call(lambda: steps.set_auto(n, bool(h.json().get("on"))))
+    BUS.publish("node_changed", {"node": n.id})
+    return _steps_view(n)
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/steps/import")
+def api_steps_import(h, m):
+    n = node_or_404(m["nid"])
+    r = steps.import_existing(n)
+    BUS.publish("node_changed", {"node": n.id})
+    return r
+
+
+# ---------------------------------------------------------------- the site map (2D editor)
+
+
+@route("GET", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/map")
+def api_map(h, m):
+    from landviz import project as project_mod
+    from landviz import sitemap
+    from landviz.resolve import resolve
+    n = node_or_404(m["nid"])
+    try:
+        proj = project_mod.load(str(n.project_dir), n.variant)
+        scene = resolve(proj)
+        data = sitemap.editable(proj, scene)
+        bds = sitemap.backdrops(proj, scene)
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(409, f"the design can't be drawn yet: {e}") from None
+    for el in data["elements"]:
+        el["step"] = steps.step_of_element(el)
+    for b in bds:
+        b["url"] = _url(Path(b.pop("path")))
+    return {**data, "backdrops": [b for b in bds if b["url"]], "comments": steps.comments(n),
+            "steps": [{k: s[k] for k in ("key", "label", "short")} for s in steps.STEPS]}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/map/edits")
+def api_map_edits(h, m):
+    from landviz import project as project_mod
+    from landviz import sitemap
+    from landviz.project import SpecError
+    from landviz.yamledit import YamlEditError
+    n = node_or_404(m["nid"])
+    if any(j.kind == "ai_round" for j in MANAGER.busy_for(n.id)):
+        raise ApiError(409, f"{ai.display_name()} is working on this design right now; edit when it's done")
+    changes = h.json().get("changes") or []
+    if not changes:
+        return {"notes": []}
+    proj = project_mod.load(str(n.project_dir), n.variant)
+    try:
+        notes = sitemap.apply_edits(proj, changes)
+    except (SpecError, YamlEditError, KeyError, IndexError) as e:
+        raise ApiError(400, f"couldn't apply the edit: {e}") from None
+    try:  # never leave a design that doesn't load
+        project_mod.load(str(n.project_dir), n.variant)
+    except Exception as e:  # noqa: BLE001
+        raise ApiError(400, f"the edit made the design invalid: {e}") from None
+    n.snapshot_design("map", "edited on the map")
+    steps.refresh(n)
+    BUS.publish("node_changed", {"node": n.id})
+    return {"notes": notes}
+
+
+@route("POST", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/map/comments")
+def api_comment_add(h, m):
+    import uuid
+    n = node_or_404(m["nid"])
+    b = h.json()
+    if b.get("step") not in steps.BY_KEY or not str(b.get("text") or "").strip():
+        raise ApiError(400, "a comment needs a step and some text")
+    c = {"id": uuid.uuid4().hex[:8], "step": b["step"], "at": [float(b["at"][0]), float(b["at"][1])],
+         "text": str(b["text"]).strip()[:2000], "created": store._now()}
+    items = steps.comments(n)
+    items.append(c)
+    steps.save_comments(n, items)
+    BUS.publish("node_changed", {"node": n.id})
+    return c
+
+
+@route("PUT", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/map/comments/(?P<cid>[a-f0-9]+)")
+def api_comment_edit(h, m):
+    n = node_or_404(m["nid"])
+    b = h.json()
+    items = steps.comments(n)
+    for c in items:
+        if c["id"] == m["cid"]:
+            if "text" in b:
+                c["text"] = str(b["text"]).strip()[:2000]
+            if "at" in b:
+                c["at"] = [float(b["at"][0]), float(b["at"][1])]
+            if "resolved" in b:
+                c["resolved"] = b["resolved"] or None
+            steps.save_comments(n, items)
+            BUS.publish("node_changed", {"node": n.id})
+            return c
+    raise ApiError(404, "no such comment")
+
+
+@route("DELETE", r"/api/nodes/(?P<nid>[^/]+(?:%2F[^/]+)?)/map/comments/(?P<cid>[a-f0-9]+)")
+def api_comment_delete(h, m):
+    n = node_or_404(m["nid"])
+    steps.save_comments(n, [c for c in steps.comments(n) if c["id"] != m["cid"]])
+    BUS.publish("node_changed", {"node": n.id})
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------- publishing a web page

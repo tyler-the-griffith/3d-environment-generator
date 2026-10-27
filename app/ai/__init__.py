@@ -69,33 +69,46 @@ def display_name() -> str:
 # ---------------------------------------------------------------- rounds
 
 
-def start_round(node: store.Node, kind: str = "design") -> dict:
-    """Freeze new inputs (design rounds) and record a new round. Returns the round record."""
+def start_round(node: store.Node, kind: str = "design", step: str | None = None, note: str = "",
+                comments: list | None = None, include_new: bool = False) -> dict:
+    """Freeze new inputs (design rounds) and record a new round. Returns the round record.
+    kind "step": one build step of the base environment (app/steps.py); new inputs are frozen into it
+    only when it starts a run from the Send button (include_new)."""
     with store.LOCK:
         d = node.inputs()
         spec = node.output_spec()
         if any(r["status"] == "awaiting_answers" for r in d["rounds"]):
             raise ValueError("answer the open questions first (or let the AI use its best judgement)")
+        if kind == "step" and any(r["status"] in ("queued", "running") for r in d["rounds"]):
+            raise ValueError("a round is already running — wait for it to finish")
         n = (d["rounds"][-1]["n"] + 1) if d["rounds"] else 1
-        new_items = [it for it in d["items"] if it.get("round") is None] if kind == "design" else []
+        take_new = kind == "design" or (kind == "step" and include_new)
+        new_items = [it for it in d["items"] if it.get("round") is None] if take_new else []
         pending = [c for c in spec["custom"] if c["status"] == "pending"]
         if kind == "design" and not new_items and not pending and d["rounds"]:
             raise ValueError("nothing new to send — add an input or an output request first")
-        if kind == "design" and not d["items"]:
+        if kind in ("design", "step") and not d["items"]:
             raise ValueError("add at least one input before sending")
         if kind == "requests" and not pending:
             raise ValueError("no pending output requests")
         for it in new_items:
             it["round"] = n
+        if kind == "step" and not include_new:
+            pending = []  # output requests ride along with the round that sends them
         for c in pending:
             c["status"], c["round"] = "in_progress", n
-        rnd = {"n": n, "kind": kind, "phase": "ask", "status": "queued", "provider": config.load_settings()["ai"]["provider"],
+        rnd = {"n": n, "kind": kind, **({"step": step, "note": note, "comments": comments or []} if kind == "step" else {}), "phase": "ask", "status": "queued", "provider": config.load_settings()["ai"]["provider"],
                "created": store._now(), "items": [it["id"] for it in new_items],
                "requests": [c["id"] for c in pending], "summary": "", "notes": [], "questions": []}
         d["rounds"].append(rnd)
         node.save_inputs(d)
         node.save_output_spec(spec)
         return rnd
+
+
+def round_meta(rnd: dict) -> dict:
+    """What the jobs list needs to link a job back to its round (e.g. Continue in Claude Code)."""
+    return {"round": rnd["n"], "provider": rnd.get("provider") or config.load_settings()["ai"]["provider"]}
 
 
 def _set_round(node: store.Node, n: int, **kw):
@@ -167,7 +180,94 @@ def _prefetch_lidar(job: Job, node: store.Node) -> str:
                 f"`./lv lidar fetch {shlex.quote(str(node.project_dir))} --latlon \"LAT, LON\"` yourself.")
 
 
-def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
+def _aerial_items(node):
+    return [it for it in node.inputs()["items"] if it["type"] == "aerial"]
+
+
+def _prefetch_aerial(job: Job, node: store.Node) -> str:
+    """If the homeowner allowed the public aerial photo, fetch it before the AI starts (cached)."""
+    items = _aerial_items(node)
+    if not items:
+        return ""
+    from landviz import aerial
+    from landviz import photos as ph
+    text = (items[-1].get("text") or "").strip()
+    args = []
+    if text:
+        ll = ph.parse_latlon(text)
+        args = ["--latlon", f"{ll[0]}, {ll[1]}"] if ll else ["--address", text]
+    meta = aerial.load(node.project_dir)
+    want = json.dumps(args)
+    if meta and meta.get("request") == want:
+        return "The public aerial photo is already in the project (`aerial/aerial.jpg`)."
+    job.set_step("Fetching the public aerial photo (USGS NAIP)", 0.04)
+    try:
+        job.lv("aerial", "fetch", str(node.project_dir), *args)
+        meta = aerial.load(node.project_dir)
+        meta["request"] = want
+        (node.project_dir / aerial.FOLDER / "aerial.json").write_text(json.dumps(meta, indent=1))
+        return (f"A straight-down public aerial photo was fetched: `aerial/aerial.jpg` ({meta['m_per_px']:.2f} m/px, "
+                f"{meta['source']}, {meta['fetched']}).")
+    except Exception as e:  # noqa: BLE001 — the round still runs without it
+        return f"Fetching the aerial photo failed ({e})."
+
+
+def _step_brief(node: store.Node, rnd: dict, lv_args: str) -> str:
+    """The part of the brief that scopes a step round to one kind of thing."""
+    from .. import steps as steps_mod
+    key = rnd["step"]
+    st = steps_mod.BY_KEY[key]
+    i = steps_mod.KEYS.index(key)
+    state = steps_mod.load(node)["steps"]
+    pq = shlex.quote(str(node.project_dir))
+    lines = [f"\n## This round: step {i + 1} of {len(steps_mod.STEPS)}, {st['label']}\n",
+             "The existing environment is built one kind of thing at a time; each step is checked by the homeowner "
+             "before the next. **Work only on this step.** Earlier steps are the foundation: use them, don't change "
+             "them. Later steps come later: don't start them.\n",
+             f"\n**Task.** {st['task']}\n"]
+    if st.get("kinds"):
+        lines.append(f"\n**You may add or change only these element kinds:** {', '.join(st['kinds'])}"
+                     + (" (outlines only: footprints, wings, deck polygons)" if st.get("fields") == "geometry" else "")
+                     + (" (everything except their outlines)" if st.get("fields") == "details" else "") + ".\n")
+    done = [s for s in steps_mod.STEPS[:i] if state[s["key"]]["status"] in steps_mod.DONE]
+    if done:
+        lines.append("\nSettled earlier steps: " + "; ".join(
+            f"{s['label']} ({'approved by the homeowner' if state[s['key']]['status'] == 'approved' else 'best judgement for now'})"
+            for s in done) + ".\n")
+    lines.append("\nIf you find a problem in an earlier step's part of the design, **don't fix it here**: describe it in "
+                 "`notes` and list that step's key in `\"revisit\"` in the result file (keys: "
+                 + ", ".join(steps_mod.KEYS) + ").\n")
+    prev = state[key]
+    if prev.get("summary") and prev.get("round") != rnd["n"]:
+        lines.append(f"\nThis step was done before (round {prev.get('round')}): {prev['summary']} "
+                     "Revise that work rather than starting over.\n")
+    if rnd.get("note"):
+        lines.append(f"\n**The homeowner's instructions for this step:**\n\n{rnd['note']}\n")
+    if rnd.get("comments"):
+        from landviz import units as U
+        k = U.TO_METERS[_units(node)]
+        lines.append("\n**Comments the homeowner pinned on the map for this step** (positions in site coordinates, "
+                     f"{_units(node)}; frame: site):\n")
+        for c in rnd["comments"]:
+            x, y = c["at"]
+            lines.append(f"- at ({x / k:.1f}, {y / k:.1f}): {c['text']}\n")
+    ids_hint = "--kinds " + ",".join(st["kinds"]) if st.get("kinds") else ("--inventory" if key == "inventory" else "")
+    lines.append(f"\n**Check your work** with `./lv map {lv_args} {ids_hint}` and look at the image (try "
+                 "`--backdrop aerial`, `plan`, `lidar` and the straight-down photos)"
+                 + (f"; for heights and roofs use `./lv photomatch {lv_args}`" if key == "details" else "")
+                 + f". The homeowner reviews this step on the same map.\n")
+    if key in ("location", "ground", "buildings", "details", "plants"):
+        lines.append(f"\nMeasured data: `./lv aerial info {pq}` and `./lv lidar info {pq}` say what's available.\n")
+    lines.append("\nIn the result file, `summary` describes this step only, and `questions` holds anything the homeowner "
+                 "should confirm for this step.\n")
+    return "".join(lines)
+
+
+def _units(node: store.Node) -> str:
+    return (store._yaml(node.project_dir / "project.yaml").get("project") or {}).get("units", "ft")
+
+
+def build_brief(node: store.Node, rnd: dict, lidar_note: str = "", aerial_note: str = "") -> str:
     d = node.inputs()
     spec = node.output_spec()
     meta = node.meta()
@@ -192,13 +292,15 @@ def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
     else:
         parts.append(f"Project **{meta['title']}**. Design file: `{node.design_path}`.\n")
     vs = node.versions()
-    if vs and vs[-1]["source"] not in ("template", "branch"):
+    if rnd["kind"] == "step":
+        pass  # the step section below says what to write
+    elif vs and vs[-1]["source"] not in ("template", "branch"):
         parts.append(f"\nThe design file already exists (version {vs[-1]['k']}, {vs[-1]['source']}). "
                      "**Revise it** for the new inputs; don't start over.\n")
     elif not node.variant:
         parts.append("\nThe design file is still the starting skeleton: write it from the inputs.\n")
 
-    if rnd["kind"] == "design":
+    if rnd["kind"] in ("design", "step"):
         sent = [it for it in d["items"] if it.get("round") not in (None, rnd["n"])]
         new = [it for it in d["items"] if it.get("round") == rnd["n"]]
         if sent:
@@ -214,8 +316,11 @@ def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
     else:
         parts.append("\nThis round has no new inputs: it's about the output requests below.\n")
 
+    if rnd["kind"] == "step":
+        parts.append(_step_brief(node, rnd, lv_args))
     sel = [t for t in OUTPUT_TYPES if t["key"] in spec["selected"]]
-    parts.append("\n## Outputs the homeowner wants\n" + "\n".join(f"- {t['label']}: {t['needs']}" for t in sel))
+    if rnd["kind"] != "step" or rnd.get("step") == "plants":  # camera views come with the last step
+        parts.append("\n## Outputs the homeowner wants\n" + "\n".join(f"- {t['label']}: {t['needs']}" for t in sel))
     pending = [c for c in spec["custom"] if c.get("round") == rnd["n"]]
     if pending:
         parts.append("\n\n## Custom output requests: decide each one\n"
@@ -237,6 +342,13 @@ def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
                      f"- `./lv lidar heights {pq} --at X,Y --at X,Y …` gives ground elevation and height above ground "
                      "(eaves, ridges, treetops) at site points.\n"
                      "- Use `site.terrain: {type: lidar}` for the ground shape.\n")
+    if aerial_note or _aerial_items(node):
+        pq = shlex.quote(str(node.project_dir))
+        parts.append("\n\n## Public aerial photo (the homeowner allowed it)\n" + (aerial_note or "") +
+                     "\nA straight-down orthophoto aligned to the map: no lean, true scale. It's the best image to trace "
+                     "ground surfaces, building outlines and tree crowns from (it can be a few years old). Once "
+                     "`site.location.origin` is set, author points in its pixels with `frame: aerial` (x right, y down), "
+                     f"or convert with `./lv aerial locate {pq} --px X,Y`. `./lv aerial info {pq}` shows its bounds.\n")
     parts.append(f"\n\n## Files you may write\n- `{node.design_path}`\n- `{node.project_dir / 'species.yaml'}`"
                  f" (only to add missing plants)\n- `{result_file}`\n")
     has_photos = any(it["type"] in ("drone", "photos") for it in d["items"])
@@ -250,6 +362,10 @@ def build_brief(node: store.Node, rnd: dict, lidar_note: str = "") -> str:
     parts.append(f"\n## Commands\nRun these **exactly as written**, from the repository root (the working directory). "
                  "Don't prefix them with `cd` or chain them with `;`/`&&`: other command shapes are blocked.\n"
                  f"- `./lv validate {lv_args}`\n- `./lv check {lv_args}`  (then open the image it prints with your Read tool)\n"
+                 f"- `./lv map {lv_args} --focus <ids> | --kinds <kinds> [--backdrop aerial|plan|lidar|photo:<name>] [--inventory]`"
+                 "  (fast 2D map over a backdrop with a grid in project units; no Blender)\n"
+                 f"- `./lv aerial info {shlex.quote(str(node.project_dir))}`, `./lv aerial locate {shlex.quote(str(node.project_dir))} --px X,Y`"
+                 f", `./lv aerial fetch {shlex.quote(str(node.project_dir))} [--latlon \"LAT, LON\" | --address \"…\"]`\n"
                  f"- `./lv species <text>`\n- `./lv photos <files or folder> --project {shlex.quote(str(node.project_dir))}`"
                  f"\n- `./lv photomatch {lv_args}`\n- `./lv plan import {shlex.quote(str(node.project_dir))} <pdf>`  "
                  "(rasterizes a PDF plan into the project's plan/ folder)\n"
@@ -277,8 +393,9 @@ def run_round(job: Job, node: store.Node, rnd: dict):
     provider = settings["provider"]
     _set_round(node, n, status="running", started=store._now(), provider=provider)
     lidar_note = _prefetch_lidar(job, node)
-    if lidar_note:
-        brief = build_brief(node, rnd, lidar_note)
+    aerial_note = _prefetch_aerial(job, node)
+    if lidar_note or aerial_note:
+        brief = build_brief(node, rnd, lidar_note, aerial_note)
         prompt_file.write_text(brief)
     # Kept so a round can still be finished after an app restart (see recover_rounds).
     (rdir / "design-before.yaml").write_text(node.design_path.read_text() if node.design_path.exists() else "")
@@ -304,8 +421,18 @@ def run_round(job: Job, node: store.Node, rnd: dict):
     except Exception as e:
         _set_round(node, n, status="failed", finished=store._now(), error=str(e))
         _finish_requests(node, n, {}, failed=True)
+        if rnd.get("kind") == "step":
+            from .. import steps as steps_mod
+            steps_mod.after_round(node, rnd, {"error": str(e)}, failed=True)
         raise
     questions = _read_questions(rdir / "questions.json")
+    if questions and not result_file.exists() and rnd.get("kind") == "step":
+        from .. import steps as steps_mod
+        if steps_mod.load(node)["auto"]:
+            # "Best judgement for every step": answer its own questions with its stated defaults.
+            job.say(f"{display_name()} asked {len(questions)} question(s); using its best judgement (auto mode)")
+            _set_round(node, n, questions=questions)
+            return answer_round(job, node, {**rnd, "questions": questions}, {})
     if questions and not result_file.exists():
         # The agent wants answers before it builds: park the round until the homeowner replies.
         _set_round(node, n, status="awaiting_answers", questions=questions, agent_pid=None,
@@ -417,6 +544,8 @@ def finish_round(job: Job, node: store.Node, rnd: dict):
     job.set_step("Validating the design", 0.8)
     issues = validate(node)
     check = None
+    if rnd.get("kind") == "step":
+        return _finish_step(job, node, rnd, result, issues, changed, v)
     if not any(i["level"] == "error" for i in issues):
         job.set_step("Rendering the plan check from the model", 0.85)
         try:
@@ -436,6 +565,48 @@ def finish_round(job: Job, node: store.Node, rnd: dict):
                design_version=v["k"] if v else None, design_changed=changed, issues=issues, check_image=check,
                agent_pid=None)
     return {"round": n, "changed": changed}
+
+
+def _finish_step(job: Job, node: store.Node, rnd: dict, result: dict, issues, changed, v):
+    """A build step finished: draw its map (and the photo match for building details), then hand the
+    step to the pipeline for review."""
+    from .. import steps as steps_mod
+    n, key = rnd["n"], rnd["step"]
+    check = None
+    if not any(i["level"] == "error" for i in issues):
+        job.set_step("Drawing the step's map", 0.85)
+        st = steps_mod.BY_KEY[key]
+        args = ["map", *node.lv_args(), "--name", f"step-{key}", "--title", st["label"]]
+        if st.get("kinds"):
+            args += ["--kinds", ",".join(st["kinds"])]
+        if key == "inventory":
+            args += ["--inventory", "--focus", "-"]
+        if key == "ground":
+            args += ["--backdrop", "lidar"]
+        try:
+            job.lv(*args)
+            check = f"map_{node.state}_step-{key}.png"
+        except Exception as e:  # noqa: BLE001
+            job.say(f"step map failed: {e}")
+        if key == "details" and "photo_matches" in (node.design_path.read_text() if node.design_path.exists() else ""):
+            job.set_step("Rendering the photo-match check from the model", 0.9)
+            try:
+                job.lv("photomatch", *node.lv_args(), "--output-type", "photo_match")
+            except Exception as e:  # noqa: BLE001
+                job.say(f"photo match failed: {e}")
+    _finish_requests(node, n, result)
+    qs = normalize_questions(result.get("questions", []))
+    _set_round(node, n, status="done", finished=store._now(), summary=result.get("summary", ""),
+               notes=result.get("notes", []), questions=[], step_questions=qs,
+               design_version=v["k"] if v else None, design_changed=changed, issues=issues, step_map=check,
+               agent_pid=None)
+    with store.LOCK:
+        d = steps_mod.load(node)
+        d["steps"][key]["questions"] = qs
+        d["steps"][key]["map"] = check
+        steps_mod.save(node, d)
+    steps_mod.after_round(node, rnd, result)
+    return {"round": n, "changed": changed, "step": key}
 
 
 def _pid_alive(pid) -> bool:
@@ -479,11 +650,12 @@ def recover_rounds(manager) -> list[str]:
                             _time.sleep(3)
                         return finish_round(job, node, rnd)
                     manager.submit("ai_round", node.id, f"Resume round {rnd['n']} — {node.meta()['title']}",
-                                   wait_then_finish, lane="ai")
+                                   wait_then_finish, lane="ai", meta=round_meta(rnd))
                     notes.append(f"{nid} round {rnd['n']}: waiting for the running AI")
                 elif result_exists and rnd["status"] == "running":
                     manager.submit("ai_round", node.id, f"Finish round {rnd['n']} — {node.meta()['title']}",
-                                   lambda job, node=node, rnd=rnd: finish_round(job, node, rnd), lane="ai")
+                                   lambda job, node=node, rnd=rnd: finish_round(job, node, rnd), lane="ai",
+                                   meta=round_meta(rnd))
                     notes.append(f"{nid} round {rnd['n']}: finishing")
                 else:
                     _set_round(node, rnd["n"], status="interrupted", finished=store._now(),
@@ -587,7 +759,8 @@ def _run_provider(job, provider, s, node, prompt_file, result_file, short, on_li
                "Bash(./lv validate:*)", "Bash(./lv check:*)", "Bash(./lv species:*)", "Bash(./lv preview:*)",
                "Bash(./lv plan import:*)", "Bash(./lv --help:*)", "Bash(./lv plan --help:*)",
                "Bash(./lv photos:*)", "Bash(./lv photomatch:*)", "Bash(./lv lidar fetch:*)", "Bash(./lv lidar info:*)",
-               "Bash(./lv lidar heights:*)", "Bash(./lv lidar image:*)",
+               "Bash(./lv lidar heights:*)", "Bash(./lv lidar image:*)", "Bash(./lv map:*)",
+               "Bash(./lv aerial info:*)", "Bash(./lv aerial locate:*)", "Bash(./lv aerial fetch:*)",
                "Bash(ls:*)", "Bash(file:*)", "Bash(pdfinfo:*)", "Bash(magick identify:*)",
                "--add-dir", str(node.project_dir)]
         if model:

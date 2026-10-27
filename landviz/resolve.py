@@ -325,7 +325,7 @@ def _photo_views(project: Project) -> list[dict]:
         hfov, vfov = photos.fov_deg(info, it.get("fov"))
         w, h = info.get("width") or 4000, info.get("height") or 3000
         scale = 1600 / max(w, h)
-        out.append({"name": it.get("name") or Path(str(f)).stem[:40], "preset": "photo", "photo": str(f),
+        out.append({"name": it.get("name") or Path(str(f)).stem[:40], "preset": "photo", "photo": str(f), "index": i,
                     "position": pos, "target": [pos[0], pos[1], pos[2] - 1], "position_above_ground": False,
                     "target_above_ground": False, "yaw_deg": float(yaw) - north, "pitch_deg": float(pitch),
                     "roll_deg": float(it.get("roll", info.get("gimbal_roll", 0.0))), "hfov_deg": hfov,

@@ -48,6 +48,19 @@ Two layers:
   outlives the app, so `recover_rounds` at server start waits for a live agent, finishes a
   round whose `result.json` exists, or marks it `interrupted` (retryable). A design changed
   outside the app is versioned as `external` the next time the node is opened.
+- `steps.py`: the build steps for a base design (the existing property): location → ground →
+  boundary → inventory → surfaces → buildings (outlines) → details → fixtures → plants. Each step
+  owns a slice of the merged spec (`content()`; structures/decks are split into outline vs
+  details). `pipeline.json` keeps per-step status (pending/working/review/approved/provisional),
+  a hash of the step's content, and `recheck` flags: `refresh()` notices any change (map, AI,
+  hand edit) and flags later settled steps. A step runs as an AI round of kind `step`
+  (`ai._step_brief` scopes it; `_finish_step` draws `lv map` instead of the Blender plan check,
+  photo match for details); `after_round` puts it up for review, or in auto mode settles it
+  provisionally and starts the next (`steps.SUBMIT`, set by the server). Auto mode also answers
+  pre-build questions with the AI's own defaults. `import_existing` loads a design made before
+  the steps (content → provisional; open questions → the step they're about, by keyword).
+  Pinned map comments live in `comments.json` and go into the step's brief with coordinates.
+  Child variants don't use steps.
 - `generate.py`: `OUTPUT_TYPES` and how each maps to `./lv` commands (`--output-type`
   tags each output in the manifest; `--extra-view` supplies orbit/pano views the design
   lacks). Types that are already up to date (current fingerprints) are skipped.
@@ -73,7 +86,15 @@ Two layers:
 - `web/`: vanilla ES modules, no build step. `main.js` (state, routing
   `#/n/<id>/<input|output>`, right-click menu), `inputs.js`, `outputs.js`, `outspec.js`
   (the one "Outputs to make" component used on both pages), `publish.js` (the web page
-  widget), `settings.js`, `theme.js` (palettes → CSS variables), `ui.js`. Palettes are
+  widget), `steps.js` (stepper + step review), `mapview.js` (the site map editor: feature list +
+  properties panel + SVG map; one instance per node survives re-renders so pan, zoom and unsaved
+  edits persist). Everything selectable is an "item" (elements, inventory, boundary, origin, photo
+  cameras, pins); one hit-test with screen-pixel tolerances decides clicks (this step first, small
+  over big, clicking the same spot again cycles). A shape must be selected before a drag moves it;
+  drags start after a few pixels; the toolbar never changes size mid-drag; backdrop `<image>`s are
+  cached (re-creating them re-decodes big photos). Edits go to `/map/edits` as `pts` (meters),
+  `value` (a field as authored), `rename` (references follow), `replace`, `spec` (design-level),
+  `add`, `delete`, `settings.js`, `theme.js` (palettes → CSS variables), `ui.js`. Palettes are
   generated: `tools/make_palettes.py` turns Coolors palettes into light/dark token sets in
   OKLab and nudges accent/status lightness until every text pair passes WCAG AA; edit the
   anchors there and re-run it rather than hand-editing `palettes.js`. `h()` skips null children, but `replaceChildren()`
@@ -137,6 +158,15 @@ draws them.
   (hip, gable, half_hip, gambrel, mansard, shed, flat, custom are just different plane sets),
   computed in core and passed to Blender as faces plus wall top profiles. Non-convex wings fall
   back to a bounding-rectangle roof with a warning. Houses are overlapping wings.
+- `aerial.py`: USGS NAIP orthophoto (`exportImage`, imageSR 4326, square in meters) saved to
+  `<project>/aerial/` with its bounds; `frame: aerial` is a PlanFrame from its corners via
+  `site.location.origin`. `sitemap.py`: map backdrops (aerial, plan, LiDAR shaded height map
+  written as a PNG with a stdlib encoder, straight-down drone photos placed from GPS/yaw/FOV),
+  `editable()` geometry in meters with the key path it came from, `render_map()` (`lv map`), and
+  `apply_edits()`: the map editor's changes written back in each element's own frame and units
+  via `yamledit.py`, which splices values into the YAML text at PyYAML node offsets so comments
+  and layout survive; unmoved points keep their original text. Child variants get
+  `elements_override` (all point keys in site frame) / `elements_add` / `elements_remove`.
 - `photos.py`: EXIF/DJI-XMP reader, FOV from 35 mm-equivalent (diagonal convention),
   lat/lon ↔ site (`site.location.origin` + `north_offset_deg`). Some exports drop the E/W refs;
   the site's longitude sign settles it. Digitally zoomed exports report the unzoomed focal

@@ -279,6 +279,11 @@ class PlanFrame:
         src = np.array([[p[0], -p[1]] for p in pts], dtype=float)
         return [tuple(map(float, q)) for q in apply_similarity(self.s, self.R, self.t, src)]
 
+    def to_pixels(self, pts):
+        """Inverse of to_site: site meters → image pixels."""
+        q = (np.asarray(pts, dtype=float)[:, :2] - self.t) @ self.R / self.s  # R is orthonormal
+        return [(float(x), float(-y)) for x, y in q]
+
     def svg_matrix(self):
         """SVG matrix(a b c d e f) placing the raw image (pixel space) into site space (y-up)."""
         M = self.s * self.R @ np.diag([1, -1])

@@ -58,8 +58,9 @@ class Cancelled(Exception):
 
 
 class Job:
-    def __init__(self, kind: str, node: str | None, title: str, fn, lane: str):
+    def __init__(self, kind: str, node: str | None, title: str, fn, lane: str, meta: dict | None = None):
         self.id = uuid.uuid4().hex[:10]
+        self.meta = meta or {}  # e.g. {"round": 3, "provider": "claude_code"} for AI rounds
         self.kind, self.node, self.title, self.fn, self.lane = kind, node, title, fn, lane
         self.status = "queued"
         self.progress = None  # 0..1 or None
@@ -73,7 +74,7 @@ class Job:
         self.cancel_requested = False
 
     def public(self, with_log=False) -> dict:
-        d = {k: getattr(self, k) for k in ("id", "kind", "node", "title", "lane", "status", "progress", "step",
+        d = {k: getattr(self, k) for k in ("id", "kind", "node", "title", "lane", "meta", "status", "progress", "step",
                                            "created", "started", "finished", "error")}
         d["log_tail"] = self.log[-6:]
         if with_log:
@@ -142,8 +143,8 @@ class Manager:
         for lane, q in self.lanes.items():
             threading.Thread(target=self._worker, args=(q,), daemon=True, name=f"lane-{lane}").start()
 
-    def submit(self, kind: str, node: str | None, title: str, fn, lane: str = "gpu") -> Job:
-        job = Job(kind, node, title, fn, lane)
+    def submit(self, kind: str, node: str | None, title: str, fn, lane: str = "gpu", meta: dict | None = None) -> Job:
+        job = Job(kind, node, title, fn, lane, meta)
         self.jobs[job.id] = job
         self.lanes[lane].put(job)
         BUS.publish("job", job.public())
