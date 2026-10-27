@@ -7,7 +7,7 @@ panoramas, a walkable 3D model in the browser, a PDF presentation and a plant sc
 ## Start
 
 ```bash
-git clone <this repo> && cd <repo>
+git clone https://github.com/tyler-the-griffith/3d-environment-generator.git && cd 3d-environment-generator
 ./launch              # Linux / macOS   (Windows: launch.bat)
 ./launch --install    # add it to your app menu (once)
 ./launch --setup      # optional extras (LiDAR point clouds) into ./.venv (once)
